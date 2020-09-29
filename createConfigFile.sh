@@ -1,6 +1,7 @@
 #!/bin/sh
 #
 CONFIG_DIR=""
+HOT_BACKUP_FLAG=0
 
 err_end () {
   echo "Error: $1"
@@ -12,7 +13,7 @@ err_end () {
   exit 1
 }
 
-while getopts "s:d:" opt
+while getopts "s:d:h" opt
 do
   case $opt in
     s)
@@ -21,8 +22,11 @@ do
     d)
       CONFIG_DIR=$OPTARG
       ;;
+    h)
+      HOT_BACKUP_FLAG=1
+      ;;
     \?)
-      err_end "Usage: $0 [ -s ORACLE_SID | -d /config/dir ]"
+      err_end "Usage: $0 [ -s ORACLE_SID | -d /config/dir | -h ]"
       ;;
   esac
 done
@@ -52,8 +56,23 @@ fi
 
 tempfile=$(mktemp)
 
+dbversion=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select version from v\\$instance ;
+   exit;
+EOF`
+
+echo "DBVERSION=$dbversion" > $tempfile
+
+dbMajorRev=$(echo $dbversion | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
+
 # Get list of datafiles
-if [ -z "$CONFIG_DIR" ]; then
+
+if [ -z "$CONFIG_DIR" -o "$HOT_BACKUP_FLAG" -eq 1 ]; then
+
+if [ "$dbMajorRev" -le 11 ]; then
 datafiles=`sqlplus -S / as sysdba << EOF
    set heading off;
    set pagesize 0;
@@ -62,7 +81,19 @@ datafiles=`sqlplus -S / as sysdba << EOF
    exit;
 EOF`
 else
+datafiles=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select name from v\\$datafile ;
+   exit;
+EOF`
+fi
+
+else
+
 datafiles=$(ls $CONFIG_DIR/data* 2>/dev/null)
+
 fi
 ret=$?
 
@@ -72,7 +103,7 @@ if [ $ret -eq 0 ] && [ -n "$datafiles" ]; then
    filecount=${#filearray[@]}
    firstfilename=$(echo $datafiles | awk '{print $1}')
    datadirname=$(dirname $firstfilename)
-   echo -n "DATAFILES=" > $tempfile
+   echo -n "DATAFILES=" >> $tempfile
    count=1
    for filename in $datafiles; do
        [ "$count" -eq 1 ] && firstdbf=$filename
@@ -92,7 +123,7 @@ dbfmountpoint=$(cd $(dirname $firstdbf); df -h . | tail -n 1 | awk '{print $NF}'
 echo "DATAFILEMOUNTPOINT=$dbfmountpoint" >> $tempfile
 
 # Write SID to file
-echo "ORACLE_SID=$ORACLE_SID" >> $tempfile
+echo "ORIG_ORACLE_SID=$ORACLE_SID" >> $tempfile
 
 # Get DB log mode
 logmode=`sqlplus -S / as sysdba << EOF
@@ -125,6 +156,9 @@ ret=$?
           echo "${dirname}"
        else
           echo -n "${dirname},"
+       fi
+       if [ $count -eq 1 ]; then
+          archlocation=${dirname}
        fi
    count=$(($count + 1))
    done >> $tempfile
@@ -193,16 +227,6 @@ EOF`
 
 echo "DBCHARSET=$dbcharset" >> $tempfile
 
-dbversion=`sqlplus -S / as sysdba << EOF
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select version from v\\$instance ;
-   exit;
-EOF`
-
-echo "DBVERSION=$dbversion" >> $tempfile
-
 # Create PFILE if not present
 if [ ! -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ]; then
    echo "PFILE not found, creating ..."
@@ -215,6 +239,8 @@ fi
 
 if [ -n "$CONFIG_DIR" ]; then
    configDirLoc=$CONFIG_DIR
+elif [ "$HOT_BACKUP_FLAG" -eq 1 ]; then
+   configDirLoc=$archlocation
 else
    configDirLoc=$dbfmountpoint
 fi
@@ -231,12 +257,17 @@ fi
 # Copy files to config directory
 cp $tempfile $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig
 
-cp $ORACLE_HOME/network/admin/listener.ora $configDirLoc/dbconfig/
-cp $ORACLE_HOME/network/admin/sqlnet.ora $configDirLoc/dbconfig/
-cp $ORACLE_HOME/network/admin/tnsnames.ora $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/network/admin/listener.ora ] && cp $ORACLE_HOME/network/admin/listener.ora $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/network/admin/sqlnet.ora ] && cp $ORACLE_HOME/network/admin/sqlnet.ora $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/network/admin/tnsnames.ora ] && cp $ORACLE_HOME/network/admin/tnsnames.ora $configDirLoc/dbconfig/
 [ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ] && cp $ORACLE_HOME/dbs/orapw${ORACLE_SID} $configDirLoc/dbconfig/
 [ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/init${ORACLE_SID}.ora $configDirLoc/dbconfig/
 [ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora $configDirLoc/dbconfig/
+
+echo "Backing up control file ..."
+sqlplus -S / as sysdba << EOF
+alter database backup controlfile to '$configDirLoc/dbconfig/control.bkp';
+EOF
 
 echo "DB ${ORACLE_SID} configuration file: $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig"
 
