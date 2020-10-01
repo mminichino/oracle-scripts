@@ -21,29 +21,43 @@ function err_exit {
    exit 1
 }
 
+function getDbVersion {
+dbversion=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select version from v\\$instance ;
+   exit;
+EOF`
+
+[ $? -ne 0 ] && return 1
+
+dbMajorRev=$(echo $dbversion | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
+}
+
 function createArchLogScript {
 
 if [ ! -d "$BACKUP_DIR" ]; then
    return 1
 fi
 
+archiveLogFormat='%U'
 archBackupScript=$(mktemp)
 
 cat <<EOF > $archBackupScript
 run
 {
-ALLOCATE CHANNEL CH01 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/archivelog/%U' ;
-SQL 'ALTER SYSTEM ARCHIVE LOG CURRENT';
+ALLOCATE CHANNEL CH01 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/archivelog/$archiveLogFormat' ;
 EOF
 
 logSeqNum=`sqlplus -S / as sysdba <<EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   SELECT THREAD#, SEQUENCE# FROM V\\$LOG WHERE STATUS = 'CURRENT' OR STATUS = 'CLEARING_CURRENT' UNION
-   SELECT THREAD#, MAX(SEQUENCE#) FROM V\\$LOG WHERE STATUS = 'INACTIVE' AND THREAD# NOT IN
-   (SELECT THREAD# FROM V\\$LOG WHERE STATUS = 'CURRENT' OR STATUS = 'CLEARING_CURRENT') GROUP BY THREAD#
-   ORDER BY THREAD#, SEQUENCE#;
+   select thread#, sequence# from v\\$log where status = 'current' or status = 'clearing_current' union
+   select thread#, max(sequence#) from v\\$log where status = 'inactive' and thread# not in
+   (select thread# from v\\$log where status = 'current' or status = 'clearing_current') group by thread#
+   order by thread#, sequence#;
 EOF`
 
 [ $? -ne 0 ] && return 1
@@ -53,9 +67,37 @@ for ((i=0; i<${#dataArray[@]}; i=i+2)); do
     threadNum=${dataArray[i]}
     untilSeqNum=${dataArray[i+1]}
     fromSeqNum=$(($untilSeqNum-1))
+
+if [ "$dbMajorRev" -gt 11 ]; then
+
+untilArchLogSeqName=`sqlplus -S / as sysdba <<EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   alter system archive log current ;
+   select name from v\\$archived_log where sequence# = $untilSeqNum ;
+EOF`
+fromArchLogSeqName=`sqlplus -S / as sysdba <<EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select name from v\\$archived_log where sequence# = $fromSeqNum ;
+EOF`
+untilArchLogSeqName=$(basename $untilArchLogSeqName)
+fromArchLogSeqName=$(basename $fromArchLogSeqName)
+cat <<EOF >> $archBackupScript
+BACKUP AS COPY ARCHIVELOG SEQUENCE $fromSeqNum THREAD $threadNum FORMAT '$BACKUP_DIR/archivelog/$fromArchLogSeqName';
+BACKUP AS COPY ARCHIVELOG SEQUENCE $untilSeqNum THREAD $threadNum FORMAT '$BACKUP_DIR/archivelog/$untilArchLogSeqName';
+EOF
+
+else
+
 cat <<EOF >> $archBackupScript
 BACKUP AS COPY ARCHIVELOG FROM SEQUENCE $fromSeqNum UNTIL SEQUENCE $untilSeqNum THREAD $threadNum ;
 EOF
+
+fi
+
 done
 
 if [ "$NO_CATALOG" -eq 1 ]; then
@@ -84,6 +126,23 @@ if [ -z "$ORACLE_SID" ]; then
    exit 1
 fi
 
+if [ "$dbMajorRev" -gt 11 ]; then
+
+pdbNames=`sqlplus -S / as sysdba <<EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select lower(name) from v\\$containers where con_id <> 1 ;
+EOF`
+
+pdbArray=($pdbNames)
+
+else
+
+pdbArray=()
+
+fi
+
 dbBackupScript=$(mktemp)
 
 cat <<EOF > $dbBackupScript
@@ -97,7 +156,14 @@ ALLOCATE CHANNEL CH04 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
 
 EOF
 
-##if [ -f "$BACKUP_DIR/control01.ctl" ]; then
+if [ "$dbMajorRev" -gt 11 ]; then
+for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
+pdbName=$(echo ${pdbArray[$i]} | sed -e 's/\$//g')
+cat <<EOF >> $dbBackupScript
+ALLOCATE CHANNEL $pdbName DEVICE TYPE DISK FORMAT '$BACKUP_DIR/$pdbName/%U';
+EOF
+done
+fi
 
 cat <<EOF >> $dbBackupScript
 
@@ -106,12 +172,33 @@ CROSSCHECK BACKUP TAG '$BACKUP_TAG' ;
 
 EOF
 
-for dataFileName in $(ls $BACKUP_DIR/data* 2>/dev/null)
+for dataFileName in $(ls $BACKUP_DIR/data_* 2>/dev/null)
 do
 cat <<EOF >> $dbBackupScript
 CATALOG DATAFILECOPY '$dataFileName' LEVEL 0 ;
 EOF
 done
+
+if [ "${#pdbArray[@]}" -gt 0 ]; then
+
+for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
+pdbName=$(echo ${pdbArray[$i]} | sed -e 's/\$//g')
+
+if [ -d "$BACKUP_DIR/$pdbName" ]; then
+for dataFileName in $(ls $BACKUP_DIR/$pdbName/data_* 2>/dev/null)
+do
+cat <<EOF >> $dbBackupScript
+CATALOG DATAFILECOPY '$dataFileName' LEVEL 0 ;
+EOF
+done
+
+else
+   mkdir $BACKUP_DIR/$pdbName
+fi
+
+done # pdbArray loop
+
+fi # pdb loop
 
 for archFileName in $(ls $BACKUP_DIR/archivelog/arch* 2>/dev/null)
 do
@@ -127,6 +214,37 @@ CATALOG CONTROLFILECOPY '$cntlFileName' ;
 EOF
 done
 
+if [ "$dbMajorRev" -gt 11 ]; then
+
+cat <<EOF >> $dbBackupScript
+
+BACKUP INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '$BACKUP_TAG' DATABASE ROOT;
+EOF
+
+for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
+pdbName=$(echo ${pdbArray[$i]} | sed -e 's/\$//g')
+cat <<EOF >> $dbBackupScript
+BACKUP CHANNEL '$pdbName' INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '$BACKUP_TAG' PLUGGABLE DATABASE '${pdbArray[$i]}';
+EOF
+done
+
+cat <<EOF >> $dbBackupScript
+RECOVER COPY OF DATABASE ROOT WITH TAG '$BACKUP_TAG';
+EOF
+
+for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
+cat <<EOF >> $dbBackupScript
+RECOVER COPY OF PLUGGABLE DATABASE '${pdbArray[$i]}' WITH TAG '$BACKUP_TAG';
+EOF
+done
+
+cat <<EOF >> $dbBackupScript
+BACKUP AS COPY CURRENT CONTROLFILE TAG '$BACKUP_TAG' FORMAT '$BACKUP_DIR/control01.ctl' REUSE ;
+DELETE NOPROMPT BACKUPSET TAG '$BACKUP_TAG';
+EOF
+
+else
+
 cat <<EOF >> $dbBackupScript
 
 BACKUP INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '$BACKUP_TAG' DATABASE;
@@ -135,6 +253,8 @@ BACKUP AS COPY CURRENT CONTROLFILE TAG '$BACKUP_TAG' FORMAT '$BACKUP_DIR/control
 DELETE NOPROMPT BACKUPSET TAG '$BACKUP_TAG';
 
 EOF
+
+fi
 
 if [ "$NO_CATALOG" -eq 1 ]; then
 
@@ -188,23 +308,19 @@ ORAENV_ASK=NO
 source oraenv
 
 if [ "$(stat -t -c '%u' /etc/oratab)" != "$(id -u)" ]; then
-   echo "This script shoud be run as the oracle user."
-   exit 1
+   err_exit "This script shoud be run as the oracle user."
 fi
 
 if [ "$OPSET" -ne 2 ]; then
-   echo "Usage: $0 -s ORACLE_SID -f | -t | -c"
-   exit 1
+   err_exit
 fi
 
 if [ ! -d "$BACKUP_DIR" ];then
-   echo "Backup directory $BACKUP_DIR does not exist."
-   exit 1
+   err_exit "Backup directory $BACKUP_DIR does not exist."
 fi
 
 if [ -z "$ORACLE_SID" -a -z "$(which sqlplus)" ]; then
-   echo "Environment not properly set."
-   exit 1
+   err_exit "Environment not properly set."
 fi
 
 [ -z "$BACKUP_TAG" ] && BACKUP_TAG=incrmrg_$ORACLE_SID
@@ -214,7 +330,7 @@ fi
 DATE=$(date '+%m%d%y-%H%M%S')
 echo "$DATE: Begin incremental merge backup." >> $LOGFILE 2>&1
 
-createArchLogScript || err_exit
+getDbVersion || err_exit
 createBackupScript || err_exit
 
 echo -n "Beginning incremental backup $BACKUP_TAG on database $ORACLE_SID ..."
@@ -231,7 +347,10 @@ else
    echo "Done."
 fi
 
+createArchLogScript || err_exit
+
 echo -n "Beginning archive log backup $BACKUP_TAG on database $ORACLE_SID ..."
+[ ! -z "$BACKUP_DIR" ] && rm -f $BACKUP_DIR/archivelog/* > /dev/null 2>&1
 rman <<EOF >> $LOGFILE 2>&1
 connect target /
 @$archBackupScript

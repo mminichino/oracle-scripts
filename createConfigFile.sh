@@ -72,7 +72,6 @@ dbMajorRev=$(echo $dbversion | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
 
 if [ -z "$CONFIG_DIR" -o "$HOT_BACKUP_FLAG" -eq 1 ]; then
 
-if [ "$dbMajorRev" -le 11 ]; then
 datafiles=`sqlplus -S / as sysdba << EOF
    set heading off;
    set pagesize 0;
@@ -80,19 +79,10 @@ datafiles=`sqlplus -S / as sysdba << EOF
    select name from v\\$datafile ;
    exit;
 EOF`
-else
-datafiles=`sqlplus -S / as sysdba << EOF
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select name from v\\$datafile ;
-   exit;
-EOF`
-fi
 
 else
 
-datafiles=$(ls $CONFIG_DIR/data* 2>/dev/null)
+datafiles=$(ls $CONFIG_DIR/data_* $CONFIG_DIR/*/data_* 2>/dev/null)
 
 fi
 ret=$?
@@ -265,6 +255,7 @@ cp $tempfile $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig
 [ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora $configDirLoc/dbconfig/
 
 echo "Backing up control file ..."
+rm -f $configDirLoc/dbconfig/control.bkp
 sqlplus -S / as sysdba << EOF
 alter database backup controlfile to '$configDirLoc/dbconfig/control.bkp';
 EOF
