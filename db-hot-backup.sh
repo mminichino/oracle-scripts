@@ -5,12 +5,23 @@ SCRIPTLOC=$(cd $(dirname $0) && pwd)
 LOGFILE=$SCRIPTLOC/log/sql.trc
 
 function err_exit {
+   DATE=$(date '+%m%d%y-%H%M%S')
+   if [ -n "$2" -a "$2" -eq 0 ]; then
+      LEVEL="INFO"
+   else
+      LEVEL="ERROR"
+   fi
    if [ -n "$1" ]; then
+      echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
       echo "$1"
    else
       echo "Usage: $0 -s ORACLE_SID -b | -e | -c"
    fi
-   exit 1
+   if [ -n "$2" ]; then
+      exit $2
+   else
+      exit 1
+   fi
 }
 
 function dbStartHotBackup {
@@ -58,8 +69,7 @@ OPSET=0
 dbfmountpoint=""
 
 if [ -z "$(which stat)" ]; then
-   echo "This script requires the stat utility."
-   exit 1
+   err_exit "This script requires the stat utility."
 fi
 
 while getopts "s:cbe" opt
@@ -86,22 +96,23 @@ do
   esac
 done
 
+if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
+   err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+fi
+
 ORAENV_ASK=NO
 source oraenv
 
 if [ "$(stat -t -c '%u' /etc/oratab)" != "$(id -u)" ]; then
-   echo "This script shoud be run as the oracle user."
-   exit 1
+   err_exit "This script shoud be run as the oracle user."
 fi
 
 if [ "$OPSET" -ne 1 ]; then
-   echo "Usage: $0 -s ORACLE_SID -f | -t | -c"
-   exit 1
+   err_exit
 fi
 
 if [ -z "$ORACLE_HOME" -a -z "$(which sqlplus)" ]; then
-   echo "Environment not properly set."
-   exit 1
+   err_exit "Environment not properly set."
 fi
 
 if [ "$BEGIN" -eq 1 ]; then
@@ -113,8 +124,7 @@ dbStartHotBackup
 
 if [ $? -ne 0 ]
 then
-   echo "Failed to put $ORACLE_SID into hot backup mode.  See $LOGFILE for more information."
-   exit 1
+   err_exit "Failed to put $ORACLE_SID into hot backup mode.  See $LOGFILE for more information."
 fi
 
 DATE=$(date '+%m%d%y-%H%M%S')
@@ -131,8 +141,7 @@ dbEndHotBackup
 
 if [ $? -ne 0 ]
 then
-   echo "Failed to end $ORACLE_SID hot backup mode.  See $LOGFILE for more information."
-   exit 1
+   err_exit "Failed to end $ORACLE_SID hot backup mode.  See $LOGFILE for more information."
 fi
 
 echo -n "Writing database configuration file ..."
@@ -140,8 +149,7 @@ $SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -h >> $LOGFILE 2>&1
 
 if [ $? -ne 0 ]
 then
-   echo "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
-   exit 1
+   err_exit "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
 else
    echo "Done."
 fi
@@ -166,10 +174,9 @@ for file in $STATUS; do
 done
 
 if [ "$BACKUPMODE" -eq 1 ]; then
-   echo "Database $ORACLE_SID is in hot backup mode."
-   exit 1
+   err_exit "Database $ORACLE_SID is in hot backup mode."
 else
-   echo "Database $ORACLE_SID is not in backup mode."
+   err_exit "Database $ORACLE_SID is not in backup mode." 0
 fi
 
 fi

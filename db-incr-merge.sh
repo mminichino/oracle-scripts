@@ -13,12 +13,23 @@ archBackupScript=""
 dbBackupScript=""
 
 function err_exit {
+   DATE=$(date '+%m%d%y-%H%M%S')
+   if [ -n "$2" -a "$2" -eq 0 ]; then
+      LEVEL="INFO"
+   else
+      LEVEL="ERROR"
+   fi
    if [ -n "$1" ]; then
+      echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
       echo "$1"
    else
-      echo "Usage: $0 -s ORACLE_SID -d /backup/dir [ -t backup_tag | -n ]"
+      echo "Usage: $0 -s ORACLE_SID -b | -e | -c"
    fi
-   exit 1
+   if [ -n "$2" ]; then
+      exit $2
+   else
+      exit 1
+   fi
 }
 
 function getDbVersion {
@@ -54,10 +65,10 @@ logSeqNum=`sqlplus -S / as sysdba <<EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   select thread#, sequence# from v\\$log where status = 'current' or status = 'clearing_current' union
-   select thread#, max(sequence#) from v\\$log where status = 'inactive' and thread# not in
-   (select thread# from v\\$log where status = 'current' or status = 'clearing_current') group by thread#
-   order by thread#, sequence#;
+   SELECT THREAD#, SEQUENCE# FROM V\\$LOG WHERE STATUS = 'CURRENT' OR STATUS = 'CLEARING_CURRENT' UNION
+   SELECT THREAD#, MAX(SEQUENCE#) FROM V\\$LOG WHERE STATUS = 'INACTIVE' AND THREAD# NOT IN
+   (SELECT THREAD# FROM V\\$LOG WHERE STATUS = 'CURRENT' OR STATUS = 'CLEARING_CURRENT') GROUP BY THREAD#
+   ORDER BY THREAD#, SEQUENCE#;
 EOF`
 
 [ $? -ne 0 ] && return 1
@@ -304,6 +315,10 @@ do
   esac
 done
 
+if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
+   err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+fi
+
 ORAENV_ASK=NO
 source oraenv
 
@@ -341,8 +356,7 @@ EOF
 
 if [ $? -ne 0 ]
 then
-   echo "Backup for $ORACLE_SID failed. See $LOGFILE for more information."
-   exit 1
+   err_exit "Backup for $ORACLE_SID failed. See $LOGFILE for more information."
 else
    echo "Done."
 fi
@@ -358,8 +372,7 @@ EOF
 
 if [ $? -ne 0 ]
 then
-   echo "Backup for $ORACLE_SID failed. See $LOGFILE for more information."
-   exit 1
+   err_exit "Backup for $ORACLE_SID failed. See $LOGFILE for more information."
 else
    echo "Done."
 fi
@@ -369,8 +382,7 @@ $SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -d $BACKUP_DIR >> $LOGFILE 2>&1
 
 if [ $? -ne 0 ]
 then
-   echo "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
-   exit 1
+   err_exit "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
 else
    echo "Done."
 fi
