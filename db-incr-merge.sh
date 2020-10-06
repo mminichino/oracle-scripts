@@ -378,7 +378,7 @@ else
 fi
 
 echo -n "Writing database configuration file ..."
-$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -d $BACKUP_DIR >> $LOGFILE 2>&1
+$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -d $BACKUP_DIR -p >> $LOGFILE 2>&1
 
 if [ $? -ne 0 ]
 then

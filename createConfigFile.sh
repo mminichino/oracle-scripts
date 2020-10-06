@@ -2,6 +2,8 @@
 #
 CONFIG_DIR=""
 HOT_BACKUP_FLAG=0
+SEPARATE_PLUG_DBF=0
+dbIsCdb=0
 
 err_end () {
   echo "Error: $1"
@@ -13,7 +15,7 @@ err_end () {
   exit 1
 }
 
-while getopts "s:d:h" opt
+while getopts "s:d:hp" opt
 do
   case $opt in
     s)
@@ -24,6 +26,9 @@ do
       ;;
     h)
       HOT_BACKUP_FLAG=1
+      ;;
+    p)
+      SEPARATE_PLUG_DBF=1
       ;;
     \?)
       err_end "Usage: $0 [ -s ORACLE_SID | -d /config/dir | -h ]"
@@ -68,9 +73,33 @@ echo "DBVERSION=$dbversion" > $tempfile
 
 dbMajorRev=$(echo $dbversion | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
 
+# Get PDB status for DB 12 and higher
+
+if [ "$dbMajorRev" -ge 12 ]; then
+
+dbIsCdbText=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select cdb from v\\$database ;
+   exit;
+EOF`
+
+if [ $? -ne 0 ]; then
+   err_end "Can not determine CDB status."
+fi
+
+if [ "$dbIsCdbText" = "YES" ]; then
+   dbIsCdb=1
+fi
+
+fi
+
 # Get list of datafiles
 
 if [ -z "$CONFIG_DIR" -o "$HOT_BACKUP_FLAG" -eq 1 ]; then
+
+if [ "$dbIsCdb" -eq 0 -o "$SEPARATE_PLUG_DBF" -eq 0 ]; then
 
 datafiles=`sqlplus -S / as sysdba << EOF
    set heading off;
@@ -82,7 +111,19 @@ EOF`
 
 else
 
-datafiles=$(ls $CONFIG_DIR/data_* $CONFIG_DIR/*/data_* 2>/dev/null)
+datafiles=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select name from v\\$datafile where con_id = 1 ;
+   exit;
+EOF`
+
+fi
+
+else
+
+datafiles=$(ls $CONFIG_DIR/data_* 2>/dev/null)
 
 fi
 ret=$?
@@ -111,6 +152,65 @@ fi
 # Write datafile mount point
 dbfmountpoint=$(cd $(dirname $firstdbf); df -h . | tail -n 1 | awk '{print $NF}')
 echo "DATAFILEMOUNTPOINT=$dbfmountpoint" >> $tempfile
+
+if [ "$dbIsCdb" -eq 1 ]; then
+
+pdbConIds=`sqlplus -S / as sysdba <<EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select con_id from v\\$containers where con_id <> 1 ;
+EOF`
+
+pdbConIdArray=($pdbConIds)
+
+pdbCount=1
+for ((i=0; i<${#pdbConIdArray[@]}; i=i+1)); do
+
+pdbName=`sqlplus -S / as sysdba <<EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select lower(name) from v\\$containers where con_id = ${pdbConIdArray[$i]} ;
+EOF`
+
+pdbDatafiles=`sqlplus -S / as sysdba <<EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select name from v\\$datafile where con_id = ${pdbConIdArray[$i]} ;
+EOF`
+
+pdbName=$(echo $pdbName | sed -e 's/\$//g')
+
+if [ "$pdbCount" -eq 1  ]; then
+   pdbNameString=$(echo "PDB_NAMES=$pdbName")
+else
+   pdbNameString=$(echo "$pdbNameString,$pdbName")
+fi
+
+pdbFileArray=($pdbDatafiles)
+pdbFileCount=${#pdbFileArray[@]}
+pdbFirstFilename=$(echo $pdbDatafiles | awk '{print $1}')
+pdbDataDirName=$(dirname $pdbFirstFilename)
+echo -n "DATAFILES_${pdbCount}=" >> $tempfile
+count=1
+for filename in $pdbDatafiles; do
+    [ "$count" -eq 1 ] && firstdbf=$filename
+    if [ $count -eq $pdbFileCount ]; then
+       echo "${filename}"
+    else
+       echo -n "${filename},"
+    fi
+    count=$(($count + 1))
+done >> $tempfile
+
+pdbCount=$(($pdbCount + 1))
+done
+
+echo $pdbNameString >> $tempfile
+
+fi
 
 # Write SID to file
 echo "ORIG_ORACLE_SID=$ORACLE_SID" >> $tempfile
