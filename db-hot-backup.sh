@@ -5,11 +5,12 @@ SCRIPTLOC=$(cd $(dirname $0) && pwd)
 LOGFILE=$SCRIPTLOC/log/sql.trc
 
 function err_exit {
-   DATE=$(date '+%m%d%y-%H%M%S')
-   if [ -n "$2" -a "$2" -eq 0 ]; then
-      LEVEL="INFO"
-   else
-      LEVEL="ERROR"
+   DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
+   LEVEL="ERROR"
+   if [ -n "$2" ]; then
+      if [ "$2" -eq 0 ]; then
+         LEVEL="INFO"
+      fi
    fi
    if [ -n "$1" ]; then
       echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
@@ -117,7 +118,7 @@ fi
 
 if [ "$BEGIN" -eq 1 ]; then
 
-DATE=$(date '+%m%d%y-%H%M%S')
+DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
 echo "$DATE: Begin hot backup mode." >> $LOGFILE 2>&1
 
 dbStartHotBackup
@@ -127,14 +128,14 @@ then
    err_exit "Failed to put $ORACLE_SID into hot backup mode.  See $LOGFILE for more information."
 fi
 
-DATE=$(date '+%m%d%y-%H%M%S')
+DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
 echo "$DATE: Done." >> $LOGFILE 2>&1
 
 fi
 
 if [ "$END" -eq 1 ]; then
 
-DATE=$(date '+%m%d%y-%H%M%S')
+DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
 echo "$DATE: End hot backup mode." >> $LOGFILE 2>&1
 
 dbEndHotBackup
@@ -154,7 +155,7 @@ else
    echo "Done."
 fi
 
-DATE=$(date '+%m%d%y-%H%M%S')
+DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
 echo "$DATE: Done." >> $LOGFILE 2>&1
 
 fi

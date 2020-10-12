@@ -13,11 +13,12 @@ archBackupScript=""
 dbBackupScript=""
 
 function err_exit {
-   DATE=$(date '+%m%d%y-%H%M%S')
-   if [ -n "$2" -a "$2" -eq 0 ]; then
-      LEVEL="INFO"
-   else
-      LEVEL="ERROR"
+   DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
+   LEVEL="ERROR"
+   if [ -n "$2" ]; then
+      if [ "$2" -eq 0 ]; then
+         LEVEL="INFO"
+      fi
    fi
    if [ -n "$1" ]; then
       echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
@@ -65,10 +66,9 @@ logSeqNum=`sqlplus -S / as sysdba <<EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   SELECT THREAD#, SEQUENCE# FROM V\\$LOG WHERE STATUS = 'CURRENT' OR STATUS = 'CLEARING_CURRENT' UNION
-   SELECT THREAD#, MAX(SEQUENCE#) FROM V\\$LOG WHERE STATUS = 'INACTIVE' AND THREAD# NOT IN
-   (SELECT THREAD# FROM V\\$LOG WHERE STATUS = 'CURRENT' OR STATUS = 'CLEARING_CURRENT') GROUP BY THREAD#
-   ORDER BY THREAD#, SEQUENCE#;
+   select thread#, sequence# from v\\$log where status = 'CURRENT' or status = 'CLEARING_CURRENT' union 
+   select thread#, max(sequence#) from v\\$log where status = 'INACTIVE' group by thread# order by thread#, sequence# ;
+   alter system archive log current ;
 EOF`
 
 [ $? -ne 0 ] && return 1
@@ -76,35 +76,27 @@ EOF`
 dataArray=($logSeqNum)
 for ((i=0; i<${#dataArray[@]}; i=i+2)); do
     threadNum=${dataArray[i]}
-    untilSeqNum=${dataArray[i+1]}
-    fromSeqNum=$(($untilSeqNum-1))
+    seqNum=${dataArray[i+1]}
 
 if [ "$dbMajorRev" -gt 11 ]; then
 
-untilArchLogSeqName=`sqlplus -S / as sysdba <<EOF
+logArchLogSeqName=`sqlplus -S / as sysdba <<EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   alter system archive log current ;
-   select name from v\\$archived_log where sequence# = $untilSeqNum ;
+   select name from v\\$archived_log where sequence# = $seqNum ;
 EOF`
-fromArchLogSeqName=`sqlplus -S / as sysdba <<EOF
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select name from v\\$archived_log where sequence# = $fromSeqNum ;
-EOF`
-untilArchLogSeqName=$(basename $untilArchLogSeqName)
-fromArchLogSeqName=$(basename $fromArchLogSeqName)
+
+logArchLogSeqName=$(basename $logArchLogSeqName)
+
 cat <<EOF >> $archBackupScript
-BACKUP AS COPY ARCHIVELOG SEQUENCE $fromSeqNum THREAD $threadNum FORMAT '$BACKUP_DIR/archivelog/$fromArchLogSeqName';
-BACKUP AS COPY ARCHIVELOG SEQUENCE $untilSeqNum THREAD $threadNum FORMAT '$BACKUP_DIR/archivelog/$untilArchLogSeqName';
+BACKUP AS COPY ARCHIVELOG SEQUENCE $seqNum THREAD $threadNum FORMAT '$BACKUP_DIR/archivelog/$logArchLogSeqName' ;
 EOF
 
 else
 
 cat <<EOF >> $archBackupScript
-BACKUP AS COPY ARCHIVELOG FROM SEQUENCE $fromSeqNum UNTIL SEQUENCE $untilSeqNum THREAD $threadNum ;
+BACKUP AS COPY ARCHIVELOG SEQUENCE $seqNum THREAD $threadNum ;
 EOF
 
 fi
@@ -160,10 +152,7 @@ cat <<EOF > $dbBackupScript
 run
 {
 set nocfau;
-ALLOCATE CHANNEL CH01 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
-ALLOCATE CHANNEL CH02 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
-ALLOCATE CHANNEL CH03 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
-ALLOCATE CHANNEL CH04 DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
+ALLOCATE CHANNEL dbbkup DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
 
 EOF
 
@@ -171,7 +160,7 @@ if [ "$dbMajorRev" -gt 11 ]; then
 for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
 pdbName=$(echo ${pdbArray[$i]} | sed -e 's/\$//g')
 cat <<EOF >> $dbBackupScript
-ALLOCATE CHANNEL $pdbName DEVICE TYPE DISK FORMAT '$BACKUP_DIR/$pdbName/%U';
+ALLOCATE CHANNEL ${pdbName} DEVICE TYPE DISK FORMAT '$BACKUP_DIR/$pdbName/%U';
 EOF
 done
 fi
@@ -342,7 +331,7 @@ fi
 
 [ ! -d "$BACKUP_DIR/archivelog" ] && mkdir $BACKUP_DIR/archivelog
 
-DATE=$(date '+%m%d%y-%H%M%S')
+DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
 echo "$DATE: Begin incremental merge backup." >> $LOGFILE 2>&1
 
 getDbVersion || err_exit
@@ -387,7 +376,7 @@ else
    echo "Done."
 fi
 
-DATE=$(date '+%m%d%y-%H%M%S')
+DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
 echo "$DATE: End Backup." >> $LOGFILE 2>&1
 
 exit 0
