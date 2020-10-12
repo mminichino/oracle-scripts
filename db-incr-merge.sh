@@ -23,7 +23,7 @@ function err_exit {
       echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
       echo "$1"
    else
-      echo "Usage: $0 -s ORACLE_SID -b | -e | -c"
+      echo "Usage: $0 -s ORACLE_SID -d /backup/directory [ -n | -t backup_tag ]"
    fi
    if [ -n "$2" ]; then
       exit $2
