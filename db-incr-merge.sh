@@ -175,7 +175,7 @@ EOF
 for dataFileName in $(ls $BACKUP_DIR/data_* 2>/dev/null)
 do
 cat <<EOF >> $dbBackupScript
-CATALOG DATAFILECOPY '$dataFileName' LEVEL 0 ;
+CATALOG DATAFILECOPY '$dataFileName' LEVEL 0 TAG '$BACKUP_TAG' ;
 EOF
 done
 
@@ -188,7 +188,7 @@ if [ -d "$BACKUP_DIR/$pdbName" ]; then
 for dataFileName in $(ls $BACKUP_DIR/$pdbName/data_* 2>/dev/null)
 do
 cat <<EOF >> $dbBackupScript
-CATALOG DATAFILECOPY '$dataFileName' LEVEL 0 ;
+CATALOG DATAFILECOPY '$dataFileName' LEVEL 0 TAG '$BACKUP_TAG' ;
 EOF
 done
 
