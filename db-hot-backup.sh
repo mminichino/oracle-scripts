@@ -3,6 +3,15 @@
 SCRIPTLOC=$(cd $(dirname $0) && pwd)
 [ ! -d $SCRIPTLOC/log ] && mkdir $SCRIPTLOC/log
 LOGFILE=$SCRIPTLOC/log/sql.trc
+HOSTNAME=$(uname -n)
+
+function log_output {
+    DATE=$(date '+%m-%d-%y_%H:%M:%S')
+    while read line; do
+        [ -z "$line" ] && continue
+        echo "$DATE $HOSTNAME: $line" >> $LOGFILE
+    done
+}
 
 function err_exit {
    DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
@@ -13,7 +22,7 @@ function err_exit {
       fi
    fi
    if [ -n "$1" ]; then
-      echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
+      echo "${LEVEL}: $1" 2>&1 | log_output
       echo "$1"
    else
       echo "Usage: $0 -s ORACLE_SID -b | -e | -c"
@@ -27,7 +36,7 @@ function err_exit {
 
 function dbStartHotBackup {
 
-sqlplus -S / as sysdba <<EOF >> $LOGFILE 2>&1
+sqlplus -S / as sysdba <<EOF 2>&1 | log_output
 whenever sqlerror exit 1
 alter system archive log current ;
 alter database begin backup ;
@@ -38,7 +47,7 @@ return $?
 
 function dbEndHotBackup {
 
-sqlplus -S / as sysdba <<EOF >> $LOGFILE
+sqlplus -S / as sysdba <<EOF 2>&1 | log_output
 whenever sqlerror exit 1
 alter database end backup ;
 alter system archive log current ;
@@ -118,8 +127,7 @@ fi
 
 if [ "$BEGIN" -eq 1 ]; then
 
-DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
-echo "$DATE: Begin hot backup mode." >> $LOGFILE 2>&1
+echo "Begin hot backup mode." 2>&1 | log_output
 
 dbStartHotBackup
 
@@ -128,15 +136,13 @@ then
    err_exit "Failed to put $ORACLE_SID into hot backup mode.  See $LOGFILE for more information."
 fi
 
-DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
-echo "$DATE: Done." >> $LOGFILE 2>&1
+echo "Begin Backup Done." 2>&1 | log_output
 
 fi
 
 if [ "$END" -eq 1 ]; then
 
-DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
-echo "$DATE: End hot backup mode." >> $LOGFILE 2>&1
+echo "End hot backup mode." 2>&1 | log_output
 
 dbEndHotBackup
 
@@ -145,18 +151,17 @@ then
    err_exit "Failed to end $ORACLE_SID hot backup mode.  See $LOGFILE for more information."
 fi
 
-echo -n "Writing database configuration file ..."
-$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -h >> $LOGFILE 2>&1
+echo "Writing database configuration file." 2>&1 | log_output
+$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -h 2>&1 | log_output
 
 if [ $? -ne 0 ]
 then
    err_exit "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
 else
-   echo "Done."
+   echo "Save configuration done." 2>&1 | log_output
 fi
 
-DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
-echo "$DATE: Done." >> $LOGFILE 2>&1
+echo "End Backup Done." 2>&1 | log_output
 
 fi
 

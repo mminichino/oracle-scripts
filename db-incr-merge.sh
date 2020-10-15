@@ -11,6 +11,15 @@ BEGIN=0
 OPSET=0
 archBackupScript=""
 dbBackupScript=""
+HOSTNAME=$(uname -n)
+
+function log_output {
+    DATE=$(date '+%m-%d-%y_%H:%M:%S')
+    while read line; do
+        [ -z "$line" ] && continue
+        echo "$DATE $HOSTNAME: $line" >> $LOGFILE
+    done
+}
 
 function err_exit {
    DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
@@ -21,7 +30,7 @@ function err_exit {
       fi
    fi
    if [ -n "$1" ]; then
-      echo "${DATE}: ${LEVEL}: $1" >> $LOGFILE 2>&1
+      echo "${LEVEL}: $1" 2>&1 | log_output
       echo "$1"
    else
       echo "Usage: $0 -s ORACLE_SID -d /backup/directory [ -n | -t backup_tag ]"
@@ -277,8 +286,7 @@ return 0
 }
 
 if [ -z "$(which stat)" ]; then
-   echo "This script requires the stat utility."
-   exit 1
+   err_exit "This script requires the stat utility."
 fi
 
 while getopts "s:t:d:n" opt
@@ -331,14 +339,13 @@ fi
 
 [ ! -d "$BACKUP_DIR/archivelog" ] && mkdir $BACKUP_DIR/archivelog
 
-DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
-echo "$DATE: Begin incremental merge backup." >> $LOGFILE 2>&1
+echo "Begin incremental merge backup." 2>&1 | log_output
 
 getDbVersion || err_exit
 createBackupScript || err_exit
 
-echo -n "Beginning incremental backup $BACKUP_TAG on database $ORACLE_SID ..."
-rman <<EOF >> $LOGFILE 2>&1
+echo "Beginning incremental backup $BACKUP_TAG on database $ORACLE_SID" 2>&1 | log_output
+rman <<EOF 2>&1 | log_output
 connect target /
 @$dbBackupScript
 EOF
@@ -347,14 +354,14 @@ if [ $? -ne 0 ]
 then
    err_exit "Backup for $ORACLE_SID failed. See $LOGFILE for more information."
 else
-   echo "Done."
+   echo "Backup Phase Done." 2>&1 | log_output
 fi
 
 createArchLogScript || err_exit
 
-echo -n "Beginning archive log backup $BACKUP_TAG on database $ORACLE_SID ..."
+echo "Beginning archive log backup $BACKUP_TAG on database $ORACLE_SID" 2>&1 | log_output
 [ ! -z "$BACKUP_DIR" ] && rm -f $BACKUP_DIR/archivelog/* > /dev/null 2>&1
-rman <<EOF >> $LOGFILE 2>&1
+rman <<EOF 2>&1 | log_output
 connect target /
 @$archBackupScript
 EOF
@@ -363,21 +370,20 @@ if [ $? -ne 0 ]
 then
    err_exit "Backup for $ORACLE_SID failed. See $LOGFILE for more information."
 else
-   echo "Done."
+   echo "Archivelog Backup Done." 2>&1 | log_output
 fi
 
-echo -n "Writing database configuration file ..."
-$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -d $BACKUP_DIR -p >> $LOGFILE 2>&1
+echo "Writing database configuration file." 2>&1 | log_output
+$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -d $BACKUP_DIR -p 2>&1 | log_output
 
 if [ $? -ne 0 ]
 then
    err_exit "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
 else
-   echo "Done."
+   echo "Saving configuration done." 2>&1 | log_output
 fi
 
-DATE=$(date '+%m%d%y-%H%M%S')" "$(uname -n)
-echo "$DATE: End Backup." >> $LOGFILE 2>&1
+echo "End Backup." 2>&1 | log_output
 
 exit 0
 ##
