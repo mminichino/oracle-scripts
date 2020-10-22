@@ -3,6 +3,8 @@
 CONFIG_DIR=""
 HOT_BACKUP_FLAG=0
 SEPARATE_PLUG_DBF=0
+LOCAL_ORACLE_SID=""
+GLOBAL_SID=""
 dbIsCdb=0
 
 err_end () {
@@ -36,8 +38,36 @@ do
   esac
 done
 
-ORAENV_ASK=NO
-source oraenv
+if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
+   # Try to get grid home
+   GRID_HOME=$(dirname $(dirname $(ps -ef | grep evmd.bin | grep -v grep | awk '{print $NF}')))
+   if [ -n "$GRID_HOME" ]; then
+      export START_PATH=$PATH
+      export PATH=$GRID_HOME/bin:$START_PATH
+      export LD_LIBRARY_PATH=$GRID_HOME/lib
+      ORACLE_HOME=$(srvctl config database -db $ORACLE_SID | grep -i "^oracle home" | awk '{print $NF}')
+      LOCAL_ORACLE_SID=$(basename $(ls $ORACLE_HOME/dbs/hc_${ORACLE_SID}*.dat) | sed -e 's/hc_//' -e 's/\.dat//')
+      if [ -z "$LOCAL_ORACLE_SID" ]; then
+         err_end "Can not configure local instance SID from Grid Home $GRID_HOME"
+      fi
+      echo "CRS found, configured instance $LOCAL_ORACLE_SID from Grid."
+      export PATH=$ORACLE_HOME/bin:$GRID_HOME/bin:$START_PATH
+      export LD_LIBRARY_PATH==$ORACLE_HOME/lib
+      GLOBAL_SID=$ORACLE_SID
+      export ORACLE_SID=$LOCAL_ORACLE_SID
+   else
+      err_end "DB Instance $ORACLE_SID not found in /etc/oratab."
+   fi
+else
+   ORAENV_ASK=NO
+   source oraenv
+fi
+
+if [ -n "$GLOBAL_SID" ]; then
+   DBNAME=$GLOBAL_SID
+else
+   DBNAME=$ORACLE_SID
+fi
 
 # Make sure the environment is properly set
 if [ -z "$ORACLE_SID" -o -z "$ORACLE_HOME" ]
@@ -213,7 +243,7 @@ echo $pdbNameString >> $tempfile
 fi
 
 # Write SID to file
-echo "ORIG_ORACLE_SID=$ORACLE_SID" >> $tempfile
+echo "ORIG_ORACLE_SID=$DBNAME" >> $tempfile
 
 # Get DB log mode
 logmode=`sqlplus -S / as sysdba << EOF
@@ -345,14 +375,21 @@ else
 fi
 
 # Copy files to config directory
-cp $tempfile $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig
+cp $tempfile $configDirLoc/dbconfig/${DBNAME}.dbconfig
 
 [ -f $ORACLE_HOME/network/admin/listener.ora ] && cp $ORACLE_HOME/network/admin/listener.ora $configDirLoc/dbconfig/
 [ -f $ORACLE_HOME/network/admin/sqlnet.ora ] && cp $ORACLE_HOME/network/admin/sqlnet.ora $configDirLoc/dbconfig/
 [ -f $ORACLE_HOME/network/admin/tnsnames.ora ] && cp $ORACLE_HOME/network/admin/tnsnames.ora $configDirLoc/dbconfig/
-[ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ] && cp $ORACLE_HOME/dbs/orapw${ORACLE_SID} $configDirLoc/dbconfig/
-[ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/init${ORACLE_SID}.ora $configDirLoc/dbconfig/
-[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora $configDirLoc/dbconfig/
+[ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ] && cp $ORACLE_HOME/dbs/orapw${ORACLE_SID} $configDirLoc/dbconfig/orapw${DBNAME}
+[ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/init${ORACLE_SID}.ora $configDirLoc/dbconfig/init${DBNAME}.ora
+[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ] && cp $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora $configDirLoc/dbconfig/spfile${DBNAME}.ora
+
+if [ -f "$configDirLoc/dbconfig/init${DBNAME}.ora" -a -n "$GLOBAL_SID" ]; then
+   EDIT_FILE=$(mktemp)
+   cat $configDirLoc/dbconfig/init${DBNAME}.ora | grep -i -e "^$ORACLE_SID" -e "^*." > $EDIT_FILE
+   cp $EDIT_FILE $configDirLoc/dbconfig/init${DBNAME}.ora
+   rm $EDIT_FILE
+fi
 
 echo "Backing up control file ..."
 rm -f $configDirLoc/dbconfig/control.bkp
@@ -360,7 +397,7 @@ sqlplus -S / as sysdba << EOF
 alter database backup controlfile to '$configDirLoc/dbconfig/control.bkp';
 EOF
 
-echo "DB ${ORACLE_SID} configuration file: $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig"
+echo "DB ${DBNAME} configuration file: $configDirLoc/dbconfig/${DBNAME}.dbconfig"
 
-cat $configDirLoc/dbconfig/${ORACLE_SID}.dbconfig
+cat $configDirLoc/dbconfig/${DBNAME}.dbconfig
 rm $tempfile

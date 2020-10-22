@@ -9,6 +9,7 @@ CHECK=0
 END=0
 BEGIN=0
 OPSET=0
+QUICK=0
 archBackupScript=""
 dbBackupScript=""
 HOSTNAME=$(uname -n)
@@ -93,7 +94,7 @@ logArchLogSeqName=`sqlplus -S / as sysdba <<EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   select name from v\\$archived_log where sequence# = $seqNum ;
+   select name from v\\$archived_log where thread# = $threadNum and sequence# = $seqNum and rownum = 1;
 EOF`
 
 logArchLogSeqName=$(basename $logArchLogSeqName)
@@ -289,7 +290,7 @@ if [ -z "$(which stat)" ]; then
    err_exit "This script requires the stat utility."
 fi
 
-while getopts "s:t:d:n" opt
+while getopts "s:t:d:nq" opt
 do
   case $opt in
     n)
@@ -306,6 +307,9 @@ do
     t)
       BACKUP_TAG=$OPTARG
       ;;
+    q)
+      QUICK=1
+      ;;
     \?)
       err_exit
       ;;
@@ -313,11 +317,35 @@ do
 done
 
 if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
-   err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+   # Try to get grid home
+   GRID_HOME=$(dirname $(dirname $(ps -ef | grep evmd.bin | grep -v grep | awk '{print $NF}')))
+   if [ -n "$GRID_HOME" ]; then
+      export START_PATH=$PATH
+      export PATH=$GRID_HOME/bin:$START_PATH
+      export LD_LIBRARY_PATH=$GRID_HOME/lib
+      ORACLE_HOME=$(srvctl config database -db $ORACLE_SID | grep -i "^oracle home" | awk '{print $NF}')
+      LOCAL_ORACLE_SID=$(basename $(ls $ORACLE_HOME/dbs/hc_${ORACLE_SID}*.dat) | sed -e 's/hc_//' -e 's/\.dat//')
+      if [ -z "$LOCAL_ORACLE_SID" ]; then
+         err_exit "Can not configure local instance SID from Grid Home $GRID_HOME"
+      fi
+      echo "CRS found, configured instance $LOCAL_ORACLE_SID from Grid." | log_output
+      export PATH=$ORACLE_HOME/bin:$GRID_HOME/bin:$START_PATH
+      export LD_LIBRARY_PATH==$ORACLE_HOME/lib
+      GLOBAL_SID=$ORACLE_SID
+      export ORACLE_SID=$LOCAL_ORACLE_SID
+   else
+      err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+   fi
+else
+   ORAENV_ASK=NO
+   source oraenv
 fi
 
-ORAENV_ASK=NO
-source oraenv
+if [ -n "$GLOBAL_SID" ]; then
+   DBNAME=$GLOBAL_SID
+else
+   DBNAME=$ORACLE_SID
+fi
 
 if [ "$(stat -t -c '%u' /etc/oratab)" != "$(id -u)" ]; then
    err_exit "This script shoud be run as the oracle user."
@@ -373,14 +401,16 @@ else
    echo "Archivelog Backup Done." 2>&1 | log_output
 fi
 
+if [ "$QUICK" -ne 1 ]; then
 echo "Writing database configuration file." 2>&1 | log_output
-$SCRIPTLOC/createConfigFile.sh -s $ORACLE_SID -d $BACKUP_DIR -p 2>&1 | log_output
+$SCRIPTLOC/createConfigFile.sh -s $DBNAME -d $BACKUP_DIR -p 2>&1 | log_output
 
 if [ $? -ne 0 ]
 then
    err_exit "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
 else
    echo "Saving configuration done." 2>&1 | log_output
+fi
 fi
 
 echo "End Backup." 2>&1 | log_output

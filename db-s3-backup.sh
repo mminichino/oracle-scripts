@@ -4,7 +4,10 @@ SCRIPTLOC=$(cd $(dirname $0) && pwd)
 [ ! -d $SCRIPTLOC/log ] && mkdir $SCRIPTLOC/log
 LOGFILE=$SCRIPTLOC/log/sql.trc
 HOSTNAME=$(uname -n)
-GLOBAL_SID=""
+BACKUP_BUCKET="orabkup"
+AUTH_KEY=""
+ENDPOINT=""
+REGION="us-east-1"
 
 function log_output {
     DATE=$(date '+%m-%d-%y_%H:%M:%S')
@@ -35,75 +38,32 @@ function err_exit {
    fi
 }
 
-function dbStartHotBackup {
-
-sqlplus -S / as sysdba <<EOF 2>&1 | log_output
-whenever sqlerror exit 1
-alter system archive log current ;
-alter database begin backup ;
-EOF
-
-return $?
-}
-
-function dbEndHotBackup {
-
-sqlplus -S / as sysdba <<EOF 2>&1 | log_output
-whenever sqlerror exit 1
-alter database end backup ;
-alter system archive log current ;
-EOF
-
-return $?
-}
-
-function getDbfMountPoint {
-
-local firstDbfFilePath=`sqlplus -S / as sysdba <<EOF
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select name from v\\$datafile where rownum = 1 ;
-   exit;
-EOF`
-local ret=$?
-
-dbfmountpoint=$(cd $(dirname $firstDbfFilePath); df -h . | tail -n 1 | awk '{print $NF}')
-
-return $ret
-}
-
-CHECK=0
-END=0
-BEGIN=0
-OPSET=0
-QUICK=0
-dbfmountpoint=""
-
 if [ -z "$(which stat)" ]; then
    err_exit "This script requires the stat utility."
 fi
 
-while getopts "s:cbeq" opt
+while getopts "s:d:b:p:e:r:" opt
 do
   case $opt in
-    c)
-      CHECK=1
-      OPSET=$(($OPSET+1))
-      ;;
     s)
       export ORACLE_SID=$OPTARG
       ;;
-    e)
-      END=1
+    d)
+      BACKUP_DIR=$OPTARG
       OPSET=$(($OPSET+1))
       ;;
     b)
-      BEGIN=1
+      BACKUP_BUCKET=$OPTARG
+      ;;
+    p)
+      AUTH_KEY=$OPTARG
+      ;;
+    e)
+      ENDPOINT=$OPTARG
       OPSET=$(($OPSET+1))
       ;;
-    q)
-      QUICK=1
+    r)
+      REGION=$OPTARG
       ;;
     \?)
       err_exit
@@ -119,6 +79,7 @@ if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
       export PATH=$GRID_HOME/bin:$START_PATH
       export LD_LIBRARY_PATH=$GRID_HOME/lib
       ORACLE_HOME=$(srvctl config database -db $ORACLE_SID | grep -i "^oracle home" | awk '{print $NF}')
+      [ -z "$ORACLE_HOME" ] && err_exit "$ORACLE_SID not properly configured."
       LOCAL_ORACLE_SID=$(basename $(ls $ORACLE_HOME/dbs/hc_${ORACLE_SID}*.dat) | sed -e 's/hc_//' -e 's/\.dat//')
       if [ -z "$LOCAL_ORACLE_SID" ]; then
          err_exit "Can not configure local instance SID from Grid Home $GRID_HOME"
@@ -146,77 +107,53 @@ if [ "$(stat -t -c '%u' /etc/oratab)" != "$(id -u)" ]; then
    err_exit "This script shoud be run as the oracle user."
 fi
 
-if [ "$OPSET" -ne 1 ]; then
+if [ "$OPSET" -ne 2 ]; then
    err_exit
 fi
 
-if [ -z "$ORACLE_HOME" -a -z "$(which sqlplus)" ]; then
+if [ ! -d "$BACKUP_DIR" ];then
+   err_exit "Backup directory $BACKUP_DIR does not exist."
+fi
+
+if [ -z "$ORACLE_SID" -a -z "$(which sqlplus 2>/dev/null)" ]; then
    err_exit "Environment not properly set."
 fi
 
-if [ "$BEGIN" -eq 1 ]; then
-
-echo "Begin hot backup mode." 2>&1 | log_output
-
-dbStartHotBackup
-
-if [ $? -ne 0 ]
-then
-   err_exit "Failed to put $ORACLE_SID into hot backup mode.  See $LOGFILE for more information."
+if [ -z "$(which aws 2>/dev/null)" ]; then
+   err_exit "AWS CLI is required."
 fi
 
-echo "Begin Backup Done." 2>&1 | log_output
-
+if [ -n "$AUTH_KEY" ]; then
+   awsParams="--profile $AUTH_KEY"
 fi
 
-if [ "$END" -eq 1 ]; then
+aws --endpoint-url $ENDPOINT --region $REGION --no-verify-ssl $awsParams s3 ls > /dev/null 2>&1
 
-echo "End hot backup mode." 2>&1 | log_output
-
-dbEndHotBackup
-
-if [ $? -ne 0 ]
-then
-   err_exit "Failed to end $ORACLE_SID hot backup mode.  See $LOGFILE for more information."
+if [ $? -ne 0 ]; then
+   err_exit "Failed to access $ENDPOINT - can not list buckets."
 fi
 
-if [ "$QUICK" -ne 1 ]; then
-echo "Writing database configuration file." 2>&1 | log_output
-$SCRIPTLOC/createConfigFile.sh -s $DBNAME -h 2>&1 | log_output
+aws --endpoint-url $ENDPOINT --region $REGION --no-verify-ssl $awsParams s3api head-bucket --bucket $BACKUP_BUCKET > /dev/null 2>&1
 
-if [ $? -ne 0 ]
-then
-   err_exit "Saving configuration for $ORACLE_SID failed. See $LOGFILE for more information."
-else
-   echo "Save configuration done." 2>&1 | log_output
-fi
+if [ $? -ne 0 ]; then
+   err_exit "Failed to access bucket $BACKUP_BUCKET - missing or inaccessible."
 fi
 
-echo "End Backup Done." 2>&1 | log_output
+$SCRIPTLOC/db-incr-merge.sh -s $DBNAME -d $BACKUP_DIR -q -n
 
+echo "Copying backup to S3 endpoint $ENDPOINT bucket $BACKUP_BUCKET" | log_output
+
+aws --endpoint-url $ENDPOINT --region $REGION --no-verify-ssl $awsParams s3 rm s3://$BACKUP_BUCKET/archivelog/ --recursive 2>&1 | grep -v InsecureRequestWarning | log_output
+
+if [ $? -ne 0 ]; then
+   err_exit "Failed to copy backup files to S3 endpoint $ENDPOINT"
 fi
 
-if [ "$CHECK" -eq 1 ]; then
+cd $BACKUP_DIR 2>/dev/null || err_exit "Can not change to backup directory $BACKUP_DIR"
+aws --endpoint-url $ENDPOINT --region $REGION --no-verify-ssl $awsParams s3 cp . s3://$BACKUP_BUCKET --recursive --no-progress 2>&1 | grep -v InsecureRequestWarning | log_output
 
-BACKUPMODE=0
-STATUS=`sqlplus -S / as sysdba <<EOF
-set heading off;
-set pagesize 0;
-set feedback off;
-select regexp_replace(status,'[ ]*','') from v\\$backup ;
-EOF`
-
-for file in $STATUS; do
-   [ "$file" != "NOTACTIVE" ] && BACKUPMODE=1
-done
-
-if [ "$BACKUPMODE" -eq 1 ]; then
-   err_exit "Database $ORACLE_SID is in hot backup mode."
-else
-   err_exit "Database $ORACLE_SID is not in backup mode." 0
+if [ $? -ne 0 ]; then
+   err_exit "Failed to copy backup files to S3 endpoint $ENDPOINT"
 fi
 
-fi
-
-exit 0
-##
+echo "Backup and transfer complete." | log_output
