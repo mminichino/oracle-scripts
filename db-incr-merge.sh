@@ -323,7 +323,8 @@ if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
       export START_PATH=$PATH
       export PATH=$GRID_HOME/bin:$START_PATH
       export LD_LIBRARY_PATH=$GRID_HOME/lib
-      ORACLE_HOME=$(srvctl config database -db $ORACLE_SID | grep -i "^oracle home" | awk '{print $NF}')
+      ORACLE_HOME=$(srvctl config database -db $ORACLE_SID | grep -i -e "^oracle home" -e "^PRCD-1229" | awk '{print $NF}' | sed -e 's/\.$//')
+      [ -z "$ORACLE_HOME" ] && err_exit "$ORACLE_SID not properly configured."
       LOCAL_ORACLE_SID=$(basename $(ls $ORACLE_HOME/dbs/hc_${ORACLE_SID}*.dat) | sed -e 's/hc_//' -e 's/\.dat//')
       if [ -z "$LOCAL_ORACLE_SID" ]; then
          err_exit "Can not configure local instance SID from Grid Home $GRID_HOME"
