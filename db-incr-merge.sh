@@ -12,6 +12,7 @@ OPSET=0
 QUICK=0
 archBackupScript=""
 dbBackupScript=""
+dbIsCdb=0
 HOSTNAME=$(uname -n)
 
 function log_output {
@@ -43,6 +44,21 @@ function err_exit {
    fi
 }
 
+function checkArchLogStatus {
+dbArchLogStatus=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select log_mode from v\\$database;
+   exit;
+EOF`
+
+if [ "$dbArchLogStatus" = "NOARCHIVELOG" ]; then
+   err_exit "Database is not in archive log mode."
+fi
+
+}
+
 function getDbVersion {
 dbversion=`sqlplus -S / as sysdba << EOF
    set heading off;
@@ -55,6 +71,23 @@ EOF`
 [ $? -ne 0 ] && return 1
 
 dbMajorRev=$(echo $dbversion | sed -n -e 's/^\([0-9]*\)\..*$/\1/p')
+
+if [ "$dbMajorRev" -gt 11 ]; then
+cdbStatus=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select cdb from v\\$database ;
+   exit;
+EOF`
+
+if [ "$cdbStatus" = "YES" ]; then
+   dbIsCdb=1
+else
+   dbIsCdb=0
+fi
+   
+fi
 }
 
 function createArchLogScript {
@@ -96,6 +129,11 @@ logArchLogSeqName=`sqlplus -S / as sysdba <<EOF
    set feedback off;
    select name from v\\$archived_log where thread# = $threadNum and sequence# = $seqNum and rownum = 1;
 EOF`
+
+if [ -z "$logArchLogSeqName" ]; then
+   echo "File for thread $threadNum sequence $seqNum not found, skipping." | log_output
+   continue
+fi
 
 logArchLogSeqName=$(basename $logArchLogSeqName)
 
@@ -139,7 +177,7 @@ if [ -z "$ORACLE_SID" ]; then
    exit 1
 fi
 
-if [ "$dbMajorRev" -gt 11 ]; then
+if [ "$dbMajorRev" -gt 11 -a "$dbIsCdb" -eq 1 ]; then
 
 pdbNames=`sqlplus -S / as sysdba <<EOF
    set heading off;
@@ -166,7 +204,7 @@ ALLOCATE CHANNEL dbbkup DEVICE TYPE DISK FORMAT '$BACKUP_DIR/%U';
 
 EOF
 
-if [ "$dbMajorRev" -gt 11 ]; then
+if [ "$dbMajorRev" -gt 11 -a "$dbIsCdb" -eq 1 ]; then
 for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
 pdbName=$(echo ${pdbArray[$i]} | sed -e 's/\$//g')
 cat <<EOF >> $dbBackupScript
@@ -224,7 +262,7 @@ CATALOG CONTROLFILECOPY '$cntlFileName' ;
 EOF
 done
 
-if [ "$dbMajorRev" -gt 11 ]; then
+if [ "$dbMajorRev" -gt 11 -a "$dbIsCdb" -eq 1 ]; then
 
 cat <<EOF >> $dbBackupScript
 
@@ -370,6 +408,7 @@ fi
 
 echo "Begin incremental merge backup." 2>&1 | log_output
 
+checkArchLogStatus
 getDbVersion || err_exit
 createBackupScript || err_exit
 

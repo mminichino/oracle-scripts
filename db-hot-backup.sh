@@ -35,6 +35,21 @@ function err_exit {
    fi
 }
 
+function checkArchLogStatus {
+dbArchLogStatus=`sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select log_mode from v\\$database;
+   exit;
+EOF`
+
+if [ "$dbArchLogStatus" = "NOARCHIVELOG" ]; then
+   err_exit "Database is not in archive log mode."
+fi
+
+}
+
 function dbStartHotBackup {
 
 sqlplus -S / as sysdba <<EOF 2>&1 | log_output
@@ -154,6 +169,8 @@ fi
 if [ -z "$ORACLE_HOME" -a -z "$(which sqlplus)" ]; then
    err_exit "Environment not properly set."
 fi
+
+checkArchLogStatus
 
 if [ "$BEGIN" -eq 1 ]; then
 
