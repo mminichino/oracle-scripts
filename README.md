@@ -23,3 +23,13 @@ To upload an incremental merge copy to S3:
 ````
 $ ./db-s3-backup.sh -s proddb -d /oradb/cloud -e https://s3.company.com -p authprofile -b bucket
 ````
+
+To create a new database with archivelog mode enabled:
+````
+$ ./db-create.sh -a -c -s demodb -d /db01/demodb
+````
+
+To remove a database:
+````
+$ ./db-delete.sh -s demodb
+````
