@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 SCRIPTLOC=$(cd $(dirname $0) && pwd)
 [ ! -d $SCRIPTLOC/log ] && mkdir $SCRIPTLOC/log
@@ -14,6 +14,7 @@ archBackupScript=""
 dbBackupScript=""
 dbIsCdb=0
 HOSTNAME=$(uname -n)
+SID_ARG=""
 
 function log_output {
     DATE=$(date '+%m-%d-%y_%H:%M:%S')
@@ -317,10 +318,6 @@ cat <<EOF >> $dbBackupScript
 }
 EOF
 
-##else
-
-##fi
-
 return 0
 }
 
@@ -335,7 +332,7 @@ do
       NO_CATALOG=1
       ;;
     s)
-      export ORACLE_SID=$OPTARG
+      SID_ARG=$OPTARG
       OPSET=$(($OPSET+1))
       ;;
     d)
@@ -353,6 +350,16 @@ do
       ;;
   esac
 done
+
+if [ -z "$ORACLE_HOME" ]; then
+   if [ -f $HOME/.bashrc ]; then
+      . $HOME/.bashrc
+   else
+      err_exit "Environment not set properly"
+   fi
+fi
+
+export ORACLE_SID=${SID_ARG:-oradb}
 
 if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
    # Try to get grid home
@@ -409,8 +416,8 @@ fi
 echo "Begin incremental merge backup." 2>&1 | log_output
 
 checkArchLogStatus
-getDbVersion || err_exit
-createBackupScript || err_exit
+getDbVersion || err_exit "Can not get database version"
+createBackupScript || err_exit "Can not create backup script"
 
 echo "Beginning incremental backup $BACKUP_TAG on database $ORACLE_SID" 2>&1 | log_output
 rman <<EOF 2>&1 | log_output

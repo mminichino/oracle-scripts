@@ -1,0 +1,24 @@
+#!/bin/sh
+
+function err_exit {
+   if [ -n "$1" ]; then
+      echo "[!] Error: $1"
+   else
+      print_usage
+   fi
+   exit 1
+}
+
+SCRIPTLOC=$(cd $(dirname $0) && pwd)
+[ ! -d $SCRIPTLOC/log ] && mkdir $SCRIPTLOC/log
+LOGFILE=$SCRIPTLOC/log/backup.log
+
+exec 2>&1
+exec > $LOGFILE
+
+[ -z "$1" ] && err_exit "Usage: $0 SID backup_directory"
+[ -z "$2" ] && err_exit "Usage: $0 SID backup_directory"
+
+echo "Starting backup for $1 on $2 at $(date)"
+/home/oracle/oracle-scripts/db-incr-merge.sh -n -s $1 -d $2 2>&1
+echo "Backup complete at $(date)"
