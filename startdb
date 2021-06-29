@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+
+function err_exit {
+   if [ -n "$1" ]; then
+      echo "$1"
+   else
+      echo "Usage: $0 [ -s ORACLE_SID ]"
+   fi
+   if [ -n "$2" ]; then
+      exit $2
+   else
+      exit 1
+   fi
+}
+
+while getopts "s:" opt
+do
+  case $opt in
+    s)
+      export ORACLE_SID=$OPTARG
+      ;;
+    \?)
+      err_exit
+      ;;
+  esac
+done
+
+if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
+   err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+fi
+
+ORAENV_ASK=NO
+source oraenv
+
+if [ -n "$(ps -ef |grep ora_pmon_$ORACLE_SID | grep -v grep | awk '{print $NF}')" ]; then
+   echo "Database already started"
+   exit
+fi
+
+sqlplus -S / as sysdba <<EOF
+whenever sqlerror exit 1
+set heading off;
+set pagesize 0;
+set feedback off;
+startup
+EOF
+
+if [ "$?" -eq 0 ]; then
+   echo "$ORACLE_SID started"
+else
+   err_exit "Database not started"
+fi
