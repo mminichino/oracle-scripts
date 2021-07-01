@@ -112,6 +112,7 @@ function enable_archlog {
 
 [ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME is not set"
 [ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID is not set"
+[ -z "$LOGDIR" ] && err_exit "Log directory is not set"
 
 which sqlplus 2>&1 >/dev/null
 [ $? -ne 0 ] && err_exit "sqlplus not found"
@@ -261,17 +262,25 @@ if [ "$LISTENER_ONLY" -eq 1 ]; then
    exit 0
 fi
 
+[ -z "$DATADIR" ] && err_exit "Data directory is required"
+
+[ ! -d "$DATADIR" -o ! -w "$DATADIR" ] && err_exit "Data directory is not accessible"
+
+LOGDIR=$DATADIR/log
+
+if [ ! -d $LOGDIR ]; then
+   mkdir $LOGDIR || err_exit "Can not create log directory"
+else
+   warn_msg "Log directory $LOGDIR exists"
+fi
+
 if [ "$ENABLELOG_ONLY" -eq 1 ]; then
    [ -n "$SID_ARG" ] && export ORACLE_SID=${SID_ARG}
    enable_archlog
    exit 0
 fi
 
-[ -z "$DATADIR" ] && err_exit "Data directory is required"
-
 [ -n "$SID_ARG" -a -z "$PDB_ARG" ] && PDB_ARG=pdb_${SID_ARG}
-
-[ ! -d "$DATADIR" -o ! -w "$DATADIR" ] && err_exit "Data directory is not accessible"
 
 [ -n "$RECODIR" ] && [ ! -d "$RECODIR" ] && [ ! -w "$RECODIR" ] && err_exit "Recovery directory is not accessible"
 
@@ -281,22 +290,13 @@ else
    warn_msg "Recovery directory $DATADIR/fra exists"
 fi
 
-[ -z "$RECODIR" ] && RECODIR=$DATADIR/fra
-
 if [ ! -d $DATADIR/dbf ]; then
    mkdir $DATADIR/dbf || err_exit "Can not create data file directory"
 else
    warn_msg "Data file directory $DATADIR/dbf exists"
 fi
 
-LOGDIR=$DATADIR/log
 DATADIR=$DATADIR/dbf
-
-if [ ! -d $LOGDIR ]; then
-   mkdir $LOGDIR || err_exit "Can not create log directory"
-else
-   warn_msg "Log directory $LOGDIR exists"
-fi
 
 export ORACLE_SID=${SID_ARG:-oradb}
 export ORACLE_PDB=${PDB_ARG:-pdb_oradb}
