@@ -267,7 +267,7 @@ if [ "$dbMajorRev" -gt 11 -a "$dbIsCdb" -eq 1 ]; then
 
 cat <<EOF >> $dbBackupScript
 
-BACKUP INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '$BACKUP_TAG' DATABASE ROOT;
+BACKUP CHANNEL 'dbbkup' INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '$BACKUP_TAG' DATABASE ROOT;
 EOF
 
 for ((i=0; i<${#pdbArray[@]}; i=i+1)); do
