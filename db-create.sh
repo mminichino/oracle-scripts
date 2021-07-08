@@ -12,6 +12,7 @@ SCRIPTDIR=$(cd $(dirname $0) && pwd)
 DBCARSPFILE="dbca-si.rsp"
 LISTENER_ONLY=0
 ENABLELOG_ONLY=0
+PWDFILE_ONLY=0
 
 function print_usage {
    echo "Usage: $0 -s SID -p pdb_name -c -a -d data_dir -r reco_dir -l -g"
@@ -23,6 +24,7 @@ function print_usage {
    echo "          -r Recovery directory (defaults to data_dir/fra)"
    echo "          -l Setup listener and exit (use -s to set SID)"
    echo "          -g Enable archivelog and exit (use -s to set SID)"
+   echo "          -w Create Oracle password file and exit (use -s to set SID)"
 }
 
 function err_exit {
@@ -46,15 +48,44 @@ function info_msg {
    fi
 }
 
+function get_password {
+   while true
+   do
+      echo -n "Password: "
+      read -s PASSWORD
+      echo ""
+      echo -n "Retype Password: "
+      read -s CHECK_PASSWORD
+      echo ""
+      if [ "$PASSWORD" != "$CHECK_PASSWORD" ]; then
+         echo "Passwords do not match"
+      else
+         break
+      fi
+   done
+   export ORACLE_PWD=$PASSWORD
+}
+
+function create_password_file {
+[ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME not set."
+[ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID not set."
+which orapwd >/dev/null 2>&1
+[ $? -ne 0 ] && err_exit "orapwd not found."
+
+get_password
+
+orapwd file=$ORACLE_HOME/dbs/orapw${ORACLE_SID} password=${ORACLE_PWD} entries=30
+}
+
 function listener_config {
 
 LSNR_RUNNING=0
 [ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME is not set"
 
-which lsnrctl 2>&1 >/dev/null
+which lsnrctl >/dev/null 2>&1
 [ $? -ne 0 ] && err_exit "lsnrctl not found"
 
-lsnrctl status 2>&1 >/dev/null
+lsnrctl status >/dev/null 2>&1
 if [ $? -eq 0 ]; then
    info_msg "Listener running"
    LSNR_RUNNING=1
@@ -225,7 +256,7 @@ oracleVersionMin=$(sqlplus -V | grep -i version | sed -e 's/^.* [0-9]*\.\([0-9]*
 
 }
 
-while getopts "s:p:cad:r:lg" opt
+while getopts "s:p:cad:r:lgw" opt
 do
   case $opt in
     s)
@@ -253,6 +284,9 @@ do
     g)
       ENABLELOG_ONLY=1
       ;;
+    w)
+      PWDFILE_ONLY=1
+      ;;
     \?)
       print_usage
       exit 1
@@ -260,11 +294,19 @@ do
   esac
 done
 
+export ORACLE_SID=${SID_ARG:-oradb}
+export ORACLE_PDB=${PDB_ARG:-pdb_oradb}
+
 get_version
 
 if [ "$LISTENER_ONLY" -eq 1 ]; then
    listener_config
    [ -n "$SID_ARG" ] && listener_config $SID_ARG
+   exit 0
+fi
+
+if [ "$PWDFILE_ONLY" -eq 1 ]; then
+   create_password_file
    exit 0
 fi
 
@@ -302,38 +344,15 @@ else
    warn_msg "Data file directory $DATADIR/dbf exists"
 fi
 
-DATADIR=$DATADIR/dbf
-
-export ORACLE_SID=${SID_ARG:-oradb}
-export ORACLE_PDB=${PDB_ARG:-pdb_oradb}
+DATAFILEDIR=$DATADIR/dbf
 
 if [ "$SET_PASSWORD" -eq 0 ]; then
    export ORACLE_PWD="$(openssl rand -base64 8 | sed -e 's/[+/=]/#/g')0"
    echo "ORACLE PASSWORD FOR SYS AND SYSTEM: $ORACLE_PWD";
 else
-   while true
-   do
-      echo -n "Password: "
-      read -s PASSWORD
-      echo ""
-      echo -n "Retype Password: "
-      read -s CHECK_PASSWORD
-      echo ""
-      if [ "$PASSWORD" != "$CHECK_PASSWORD" ]; then
-         echo "Passwords do not match"
-      else
-         break
-      fi
-   done
-   export ORACLE_PWD=$PASSWORD
+   get_password
 fi
 
-echo -n "Oracle password: "
-if [ "$SET_PASSWORD" -eq 0 ]; then
-   echo $ORACLE_PWD
-else
-   echo "********"
-fi
 echo "Oracle SID     : $ORACLE_SID"
 echo "DB Version     : ${oracleVersionMaj}.${oracleVersionMin}"
 echo -n "Create PDB     : "
@@ -357,13 +376,13 @@ cp $SCRIPTDIR/$oracleVersionMaj/$DBCARSPFILE /tmp/dbca.rsp
 if [ "$CREATE_PDB" -eq 0 ]; then
    sed -i -e "s|###ORACLE_SID###|$ORACLE_SID|g" /tmp/dbca.rsp
    sed -i -e "s|###ORACLE_PWD###|$ORACLE_PWD|g" /tmp/dbca.rsp
-   sed -i -e "s|###DATADIR###|$DATADIR|g" /tmp/dbca.rsp
+   sed -i -e "s|###DATADIR###|$DATAFILEDIR|g" /tmp/dbca.rsp
    sed -i -e "s|###RECODIR###|$RECODIR|g" /tmp/dbca.rsp
    sed -i -e "s|###ORACLE_CHARACTERSET###|$ORACLE_CHARACTERSET|g" /tmp/dbca.rsp
 else
    sed -i -e "s|###ORACLE_SID###|$ORACLE_SID|g" /tmp/dbca.rsp
    sed -i -e "s|###ORACLE_PWD###|$ORACLE_PWD|g" /tmp/dbca.rsp
-   sed -i -e "s|###DATADIR###|$DATADIR|g" /tmp/dbca.rsp
+   sed -i -e "s|###DATADIR###|$DATAFILEDIR|g" /tmp/dbca.rsp
    sed -i -e "s|###RECODIR###|$RECODIR|g" /tmp/dbca.rsp
    sed -i -e "s|###ORACLE_PDB###|$ORACLE_PDB|g" /tmp/dbca.rsp
    sed -i -e "s|###ORACLE_CHARACTERSET###|$ORACLE_CHARACTERSET|g" /tmp/dbca.rsp
