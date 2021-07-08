@@ -68,7 +68,7 @@ grep -i $1 $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
 [ $? -eq 0 ] && info_msg "Instance $1 already configured" && return
 
 cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
-$1=
+$1 =
   (DESCRIPTION =
     (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))
     (CONNECT_DATA =
@@ -76,6 +76,9 @@ $1=
       (SERVICE_NAME = $1)
     )
   )
+
+LISTENER_$1 =
+  (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))
 EOF
 
 [ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
