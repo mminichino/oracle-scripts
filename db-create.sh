@@ -60,9 +60,12 @@ if [ $? -eq 0 ]; then
    LSNR_RUNNING=1
 fi
 
+LOCAL_HOSTNAME=$(hostname -f)
+[ -z "$LOCAL_HOSTNAME" ] && err_exit "Can not get local host name."
+
 if [ -n "$1" ]; then
 
-echo "Configuring instance $1 on node $(uname -n)"
+echo "Configuring instance $1 on node $LOCAL_HOSTNAME"
 
 grep -i $1 $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
 [ $? -eq 0 ] && info_msg "Instance $1 already configured" && return
@@ -70,7 +73,7 @@ grep -i $1 $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
 cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
 $1 =
   (DESCRIPTION =
-    (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))
+    (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
     (CONNECT_DATA =
       (SERVER = DEDICATED)
       (SERVICE_NAME = $1)
@@ -78,7 +81,7 @@ $1 =
   )
 
 LISTENER_$1 =
-  (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))
+  (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
 EOF
 
 [ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
@@ -99,7 +102,7 @@ LISTENER =
 (DESCRIPTION_LIST =
   (DESCRIPTION =
     (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1))
-    (ADDRESS = (PROTOCOL = TCP)(HOST = 0.0.0.0)(PORT = 1521))
+    (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
   )
 )
 
