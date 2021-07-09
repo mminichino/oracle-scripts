@@ -3,9 +3,12 @@
 #
 unset SID_ARG
 SCRIPTDIR=$(cd $(dirname $0) && pwd)
+LISTENER_ONLY=0
 
 function print_usage {
-   echo "Usage: $0 -s SID -p -n tnshost"
+   echo "Usage: $0 -s SID [ -l ]"
+   echo "          -s Oracle SID"
+   echo "          -l Just remove SID from tnsnames.ora"
 }
 
 function err_exit {
@@ -23,13 +26,21 @@ function warn_msg {
    fi
 }
 
+function listener_remove {
+[ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME not set."
+[ ! -f $ORACLE_HOME/network/admin/tnsnames.ora ] && err_exit "tnsnames.ora file not found."
+[ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID not set."
+
+sed -i -e "/$ORACLE_SID.*=/,/^ *\$/d" $ORACLE_HOME/network/admin/tnsnames.ora
+}
+
 function listener_config {
 
 [ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME is not set"
 
 if [ -n "$1" ]; then
    echo "Removing instance $1 on node $(uname -n)"
-   sed -i -e "/^demodb/,/^  )/d" $ORACLE_HOME/network/admin/tnsnames.ora
+   listener_remove
 fi
 
 which lsnrctl 2>&1 >/dev/null
@@ -52,7 +63,8 @@ ISCDB=`sqlplus -S / as sysdba << EOF
    set feedback off;
    select name from v\\$containers where con_id = 0;
    exit;
-EOF`
+EOF
+`
 
 [ $? -ne 0 ] && err_exit "Error getting CDB status"
 
@@ -70,7 +82,8 @@ sysDataFile=`sqlplus -S / as sysdba << EOF
    set feedback off;
    select name from v\\$datafile where ts# = 0 and con_id = $cdbConId ;
    exit;
-EOF`
+EOF
+`
 
 [ $? -ne 0 ] && err_exit "Error connecing to SID $ORACLE_SID"
 
@@ -84,7 +97,8 @@ archLogLocation=`sqlplus -S / as sysdba << EOF
    set feedback off;
    select destination from v\\$archive_dest where dest_name='LOG_ARCHIVE_DEST_1';
    exit;
-EOF`
+EOF
+`
 
 [ $? -ne 0 ] && err_exit "Error connecing to SID $ORACLE_SID"
 
@@ -96,17 +110,21 @@ recoveryLocation=`sqlplus -S / as sysdba << EOF
    set feedback off;
    select name from v\\$recovery_file_dest where con_id = 0;
    exit;
-EOF`
+EOF
+`
 
 [ $? -ne 0 ] && err_exit "Error connecing to SID $ORACLE_SID"
 
 }
 
-while getopts "s:" opt
+while getopts "s:l" opt
 do
   case $opt in
     s)
       SID_ARG=$OPTARG
+      ;;
+    l)
+      LISTENER_ONLY=1
       ;;
     \?)
       print_usage
@@ -116,7 +134,12 @@ do
 done
 
 [ -z "$SID_ARG" ] && [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not defined"
-[ -n "$SID_ARG" ] && export ORACLE_SID=$SID_ARG
+export ORACLE_SID=$SID_ARG
+
+if [ "$LISTENER_ONLY" -eq 1 ]; then
+   listener_remove
+   exit 0
+fi
 
 get_db_path
 

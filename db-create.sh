@@ -71,10 +71,41 @@ function create_password_file {
 [ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID not set."
 which orapwd >/dev/null 2>&1
 [ $? -ne 0 ] && err_exit "orapwd not found."
+if [ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ]; then
+   info_msg "Password file already exists."
+   return
+fi
 
 get_password
 
 orapwd file=$ORACLE_HOME/dbs/orapw${ORACLE_SID} password=${ORACLE_PWD} entries=30
+}
+
+function listener_register {
+[ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID not set."
+
+if [ -z "$(ps -ef |grep ora_pmon_$ORACLE_SID | grep -v grep | awk '{print $NF}')" ]; then
+   info_msg "Register listener: Instance $ORACLE_SID not running"
+   return
+fi
+
+which sqlplus 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "sqlplus not found"
+
+echo -n "Dynamically registering SID $ORACLE_SID ..."
+sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   alter system set local_listener = '' ;
+   alter system register ;
+   exit;
+EOF
+if [ $? -ne 0 ]; then
+   err_exit "Failed to register instance"
+else
+   echo "Done."
+fi
 }
 
 function listener_config {
@@ -113,6 +144,7 @@ ${1^^} =
 
 LISTENER_${1^^} =
   (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
+
 EOF
 
 [ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
@@ -227,13 +259,18 @@ fi
 }
 
 function add_local_listener {
+[ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID not set."
+LOCAL_HOSTNAME=$(hostname -f)
+
+which sqlplus 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "sqlplus not found"
 
 echo -n "Set local_listener ..."
 sqlplus -S / as sysdba << EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   alter system set local_listener='(ADDRESS=(PROTOCOL=TCP)(HOST=0.0.0.0)(PORT=1521))';
+   alter system set local_listener='(ADDRESS=(PROTOCOL=TCP)(HOST=$LOCAL_HOSTNAME)(PORT=1521))';
    exit;
 EOF
 if [ $? -ne 0 ]; then
@@ -302,6 +339,7 @@ get_version
 if [ "$LISTENER_ONLY" -eq 1 ]; then
    listener_config
    [ -n "$SID_ARG" ] && listener_config $SID_ARG
+   [ -n "$SID_ARG" ] && listener_register
    exit 0
 fi
 
