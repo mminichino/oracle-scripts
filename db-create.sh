@@ -13,18 +13,22 @@ DBCARSPFILE="dbca-si.rsp"
 LISTENER_ONLY=0
 ENABLELOG_ONLY=0
 PWDFILE_ONLY=0
+ASM_MODE=0
+FRA_LOG_MODE=0
 
 function print_usage {
-   echo "Usage: $0 -s SID -p pdb_name -c -a -d data_dir -r reco_dir -l -g"
+   echo "Usage: $0 -s SID -p pdb_name -c -a -d data_dir -r reco_dir -l -g -w -m -f"
    echo "          -s Oracle SID (oradb by default)"
    echo "          -p PDB name (pdb_oradb by default)"
-   echo "          -c Create a CDB with PDB (defaults to Non-CDB"
+   echo "          -c Create a CDB with PDB (defaults to Non-CDB)"
    echo "          -a Ask for sys/system password (defaults to randomly gemnerated)"
    echo "          -d Data directory root (required, must exist)"
    echo "          -r Recovery directory (defaults to data_dir/fra)"
    echo "          -l Setup listener and exit (use -s to set SID)"
    echo "          -g Enable archivelog and exit (use -s to set SID)"
    echo "          -w Create Oracle password file and exit (use -s to set SID)"
+   echo "          -m Enable ASM mode (provide disk group with -d option)"
+   echo "          -f Use FRA for archive logs"
 }
 
 function err_exit {
@@ -186,6 +190,7 @@ function enable_archlog {
 which sqlplus 2>&1 >/dev/null
 [ $? -ne 0 ] && err_exit "sqlplus not found"
 
+if [ "$FRA_LOG_MODE" -eq 0 ]; then
 echo -n "Setting archive log destination to $LOGDIR ..."
 sqlplus -S / as sysdba << EOF
    set heading off;
@@ -198,6 +203,7 @@ if [ $? -ne 0 ]; then
    err_exit "Failed to set log destination"
 else
    echo "Done."
+fi
 fi
 
 echo -n "Shutting down instance ..."
@@ -293,7 +299,71 @@ oracleVersionMin=$(sqlplus -V | grep -i version | sed -e 's/^.* [0-9]*\.\([0-9]*
 
 }
 
-while getopts "s:p:cad:r:lgw" opt
+function fs_prep {
+[ -z "$DATADIR" ] && err_exit "Data directory is required"
+
+[ ! -d "$DATADIR" -o ! -w "$DATADIR" ] && err_exit "Data directory is not accessible"
+
+LOGDIR=$DATADIR/log
+
+if [ ! -d $LOGDIR ]; then
+   mkdir $LOGDIR || err_exit "Can not create log directory"
+else
+   warn_msg "Log directory $LOGDIR exists"
+fi
+
+[ -n "$RECODIR" ] && [ ! -d "$RECODIR" ] && [ ! -w "$RECODIR" ] && err_exit "Recovery directory is not accessible"
+
+if [ -z "$RECODIR" -a ! -d $DATADIR/fra ]; then
+   mkdir $DATADIR/fra || err_exit "Can not create recovery directory"
+else
+   warn_msg "Recovery directory $DATADIR/fra exists"
+fi
+
+if [ ! -d $DATADIR/dbf ]; then
+   mkdir $DATADIR/dbf || err_exit "Can not create data file directory"
+else
+   warn_msg "Data file directory $DATADIR/dbf exists"
+fi
+
+DATAFILEDIR=$DATADIR/dbf
+}
+
+function asm_prep {
+[ -z "$ORACLE_SID" ] && err_exit "Oracle SID is not set"
+HOST_GRID_HOME=$(dirname $(dirname $(ps -ef |grep evmd.bin | grep -v grep | awk '{print $NF}')))
+[ -z "$HOST_GRID_HOME" ] && err_exit "Oracle CRS does not seem to be running"
+HOST_ASM_INSTANCE=$(ps -ef | grep pmon_+ASM | grep -v grep | awk '{print $NF}' | sed -e 's/^.*_pmon_//')
+[ -z "$HOST_ASM_INSTANCE" ] && err_exit "ASM does not appear to be running"
+
+ORACLE_HOME_SAVE=$ORACLE_HOME
+PATH_SAVE=$PATH
+ORACLE_SID_SAVE=$ORACLE_SID
+
+export ORACLE_HOME=$HOST_GRID_HOME
+export PATH=$ORACLE_HOME/bin:$PATH
+export ORACLE_SID=$HOST_ASM_INSTANCE
+
+asmcmd ls $DATADIR >/dev/null 2>&1
+[ $? -ne 0 ] && err_exit "Disk group $DATADIR does not exist."
+
+if [ -n "$RECODIR" ]; then
+   asmcmd ls $RECODIR >/dev/null 2>&1
+   [ $? -ne 0 ] && err_exit "Disk group $DATADIR does not exist."
+   LOGDIR=$RECODIR
+else
+   RECODIR=$DATADIR
+   LOGDIR=$DATADIR
+fi
+
+DATAFILEDIR=$DATADIR
+
+export ORACLE_HOME=$ORACLE_HOME_SAVE
+export PATH=$PATH_SAVE
+export ORACLE_SID=$ORACLE_SID_SAVE
+}
+
+while getopts "s:p:cad:r:lgwm" opt
 do
   case $opt in
     s)
@@ -304,7 +374,6 @@ do
       ;;
     c)
       CREATE_PDB=1
-      DBCARSPFILE="dbca-si-cdb.rsp"
       ;;
     a)
       SET_PASSWORD=1
@@ -324,6 +393,13 @@ do
     w)
       PWDFILE_ONLY=1
       ;;
+    m)
+      ASM_MODE=1
+      DBCARSPFILE="dbca-si-asm.rsp"
+      ;;
+    f)
+      FRA_LOG_MODE=1
+      ;;
     \?)
       print_usage
       exit 1
@@ -331,8 +407,17 @@ do
   esac
 done
 
+if [ "$CREATE_PDB" -eq 1 ]; then
+   if [ "$ASM_MODE" -eq 1 ]; then
+      DBCARSPFILE="dbca-si-cdb-asm.rsp"
+   else
+      DBCARSPFILE="dbca-si-cdb.rsp"
+   fi
+fi
+
 export ORACLE_SID=${SID_ARG:-oradb}
 export ORACLE_PDB=${PDB_ARG:-pdb_oradb}
+[ -n "$SID_ARG" -a -z "$PDB_ARG" ] && PDB_ARG=pdb_${SID_ARG}
 
 get_version
 
@@ -348,16 +433,10 @@ if [ "$PWDFILE_ONLY" -eq 1 ]; then
    exit 0
 fi
 
-[ -z "$DATADIR" ] && err_exit "Data directory is required"
-
-[ ! -d "$DATADIR" -o ! -w "$DATADIR" ] && err_exit "Data directory is not accessible"
-
-LOGDIR=$DATADIR/log
-
-if [ ! -d $LOGDIR ]; then
-   mkdir $LOGDIR || err_exit "Can not create log directory"
+if [ "$ASM_MODE" -eq 0 ]; then
+   fs_prep
 else
-   warn_msg "Log directory $LOGDIR exists"
+   asm_prep
 fi
 
 if [ "$ENABLELOG_ONLY" -eq 1 ]; then
@@ -365,24 +444,6 @@ if [ "$ENABLELOG_ONLY" -eq 1 ]; then
    enable_archlog
    exit 0
 fi
-
-[ -n "$SID_ARG" -a -z "$PDB_ARG" ] && PDB_ARG=pdb_${SID_ARG}
-
-[ -n "$RECODIR" ] && [ ! -d "$RECODIR" ] && [ ! -w "$RECODIR" ] && err_exit "Recovery directory is not accessible"
-
-if [ -z "$RECODIR" -a ! -d $DATADIR/fra ]; then
-   mkdir $DATADIR/fra || err_exit "Can not create recovery directory"
-else
-   warn_msg "Recovery directory $DATADIR/fra exists"
-fi
-
-if [ ! -d $DATADIR/dbf ]; then
-   mkdir $DATADIR/dbf || err_exit "Can not create data file directory"
-else
-   warn_msg "Data file directory $DATADIR/dbf exists"
-fi
-
-DATAFILEDIR=$DATADIR/dbf
 
 if [ "$SET_PASSWORD" -eq 0 ]; then
    export ORACLE_PWD="$(openssl rand -base64 8 | sed -e 's/[+/=]/#/g')0"
@@ -406,7 +467,19 @@ echo "Recovery Dir   : $RECODIR"
 echo "Log Dir        : $LOGDIR"
 echo ""
 
-[ -f /tmp/dbca.rsp  ] && err_exit "/tmp/dbca.rsp exists"
+if [ -f /tmp/dbca.rsp  ]; then
+   info_msg "/tmp/dbca.rsp exists"
+   echo -n "Remove? (y/n): "
+   read ANSWER
+
+   if [ "$ANSWER" == "y" ]; then
+      rm /tmp/dbca.rsp
+   else
+      echo "Aborting ..."
+      exit 1
+   fi
+fi
+
 [ ! -f $SCRIPTDIR/$oracleVersionMaj/$DBCARSPFILE ] && err_exit "Can not open response file template $SCRIPTDIR/$oracleVersionMaj/$DBCARSPFILE"
 
 cp $SCRIPTDIR/$oracleVersionMaj/$DBCARSPFILE /tmp/dbca.rsp
