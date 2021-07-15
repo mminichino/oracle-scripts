@@ -316,7 +316,9 @@ fi
 
 if [ -z "$RECODIR" -a ! -d $DATADIR/fra ]; then
    mkdir $DATADIR/fra || err_exit "Can not create recovery directory"
-else
+   RECODIR=$DATADIR/fra
+elif [ -z "$RECODIR" -a -d $DATADIR/fra ]; then
+   RECODIR=$DATADIR/fra
    warn_msg "Recovery directory $DATADIR/fra exists"
 fi
 
