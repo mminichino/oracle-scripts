@@ -421,12 +421,12 @@ if [ $? -eq 0 ]; then
    info_msg "Instance ${PRIMARY_SID}_STB already configured"
 else
 cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
-${PRIMARY_SID^^}_STB =
+${PRIMARY_SID}_stb =
   (DESCRIPTION =
     (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
     (CONNECT_DATA =
-      (SERVER = DEDICATED)
       (SERVICE_NAME = $PRIMARY_SID)
+      (UR = A)
     )
   )
 
@@ -438,12 +438,12 @@ if [ $? -eq 0 ]; then
    info_msg "Instance $PRIMARY_SID already configured"
 else
 cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
-${PRIMARY_SID^^} =
+${PRIMARY_SID} =
   (DESCRIPTION =
     (ADDRESS = (PROTOCOL = TCP)(HOST = $REMOTE_HOST)(PORT = 1521))
     (CONNECT_DATA =
-      (SERVER = DEDICATED)
       (SERVICE_NAME = $PRIMARY_SID)
+      (UR = A)
     )
   )
 
