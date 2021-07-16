@@ -458,7 +458,8 @@ else
 fi
 
 rman <<EOF
-connect target sys/${ORACLE_PWD}@$PRIMARY_SID auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_STB
+connect target sys/${ORACLE_PWD}@$PRIMARY_SID
+connect auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_STB
 duplicate target database for standby from active database nofilenamecheck;
 EOF
 
