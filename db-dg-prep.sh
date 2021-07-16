@@ -31,6 +31,24 @@ function info_msg {
    fi
 }
 
+function get_password {
+   while true
+   do
+      echo -n "Password: "
+      read -s PASSWORD
+      echo ""
+      echo -n "Retype Password: "
+      read -s CHECK_PASSWORD
+      echo ""
+      if [ "$PASSWORD" != "$CHECK_PASSWORD" ]; then
+         echo "Passwords do not match"
+      else
+         break
+      fi
+   done
+   export ORACLE_PWD=$PASSWORD
+}
+
 function get_db_path {
 [ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
 export ORACLE_SID=$PRIMARY_SID
@@ -123,6 +141,11 @@ ssh -o BatchMode=yes $REMOTE_HOST ls >/dev/null 2>&1
 echo -n "Copying init${ORACLE_SID}.ora to $REMOTE_HOST ..."
 scp -q -o BatchMode=yes $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ${ORA_USER}@${REMOTE_HOST}:$ORACLE_HOME/dbs
 [ $? -ne 0 ] && err_exit "Can not copy pfile to remote host."
+echo "Done."
+
+echo -n "Copying password file to $REMOTE_HOST ..."
+scp -q -o BatchMode=yes $ORACLE_HOME/dbs/orapw${ORACLE_SID} ${ORA_USER}@${REMOTE_HOST}:$ORACLE_HOME/dbs/orapw${ORACLE_SID}
+[ $? -ne 0 ] && err_exit "Can not copy password file to remote host."
 echo "Done."
 
 echo -n "Creating data path $dataFilePath on $REMOTE_HOST ..."
@@ -253,10 +276,6 @@ for ((i=0; i<${#LOG_LIST[@]}; i=i+4)); do
     threadNum=${LOG_LIST[i+1]}
     logSize=${LOG_LIST[i+2]}
     memberCount=${LOG_LIST[i+3]}
-    echo $groupNum
-    echo $threadNum
-    echo $logSize
-    echo $memberCount
 
 GROUPFILES=$(sqlplus -S / as sysdba << EOF
    whenever sqlerror exit sql.sqlcode
@@ -345,6 +364,120 @@ EOF
 
 }
 
+function listener_standby_config {
+
+[ -z "$PRIMARY_SID" ] && err_exit "Standby SID not set"
+[ -z "$REMOTE_HOST" ] && err_exit "Remote host not set"
+
+which tnsping  >/dev/null 2>&1
+[ $? -ne 0 ] && err_exit "This utility requires tnsping"
+
+tnsping $REMOTE_HOST >/dev/null 2>&1
+[ $? -ne 0 ] && err_exit "Can not connect to listener on host $REMOTE_HOST"
+
+LSNR_RUNNING=0
+[ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME is not set"
+
+which lsnrctl >/dev/null 2>&1
+[ $? -ne 0 ] && err_exit "lsnrctl not found"
+
+lsnrctl status >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+   info_msg "Listener running"
+   LSNR_RUNNING=1
+else
+   err_exit "Listener not running - Please configure and start the listener."
+fi
+
+echo "Configuring instances $PRIMARY_SID and ${PRIMARY_SID}_STB on node $REMOTE_HOST"
+
+grep -i ${PRIMARY_SID}_STB $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
+if [ $? -eq 0 ]; then
+   info_msg "Instance ${PRIMARY_SID}_STB already configured"
+else
+cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
+${PRIMARY_SID^^}_STB =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = $REMOTE_HOST)(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = $PRIMARY_SID)
+    )
+  )
+
+EOF
+fi
+
+grep -i $PRIMARY_SID $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
+if [ $? -eq 0 ]; then
+   info_msg "Instance $PRIMARY_SID already configured"
+else
+cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
+${PRIMARY_SID^^} =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = $REMOTE_HOST)(PORT = 1521))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = $PRIMARY_SID)
+    )
+  )
+
+EOF
+fi
+
+[ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
+
+}
+
+function standby_rman {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+which sqlplus 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "sqlplus not found"
+
+which rman 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "rman not found"
+
+echo "Starting standby database not mounted ..."
+sqlplus -S / as sysdba << EOF
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   startup nomount
+   exit;
+EOF
+if [ $? -ne 0 ]; then
+   err_exit "Failed to start standby database"
+else
+   echo "Done."
+fi
+
+rman <<EOF
+connect target sys/${ORACLE_PWD}@$PRIMARY_SID auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_STB
+duplicate target database for standby from active database nofilenamecheck;
+EOF
+
+echo "Enabling recovery ..."
+sqlplus -S / as sysdba << EOF
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   alter database recover managed standby database disconnect;
+   exit;
+EOF
+if [ $? -ne 0 ]; then
+   err_exit "Failed to enable recovery"
+else
+   echo "Done."
+fi
+
+}
+
 while getopts "p:h:r" opt
 do
   case $opt in
@@ -366,14 +499,15 @@ done
 
 [ -z "$PRIMARY_SID" ] && err_exit "Primary SID is required"
 
-get_db_path
-
-create_pfile
-
-copy_to_remote
-
-# listener_remote_config
-
-# set_primary_db_parameters
-
-# create_standby_logs
+if [ "$REMOTE_SIDE" -eq 0 ]; then
+   get_db_path
+   create_pfile
+   copy_to_remote
+   listener_remote_config
+   set_primary_db_parameters
+   create_standby_logs
+else
+   get_password
+   listener_standby_config
+   standby_rman
+fi
