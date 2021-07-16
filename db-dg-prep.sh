@@ -10,11 +10,30 @@ function print_usage {
    echo "          -h Oracle standby database host"
 }
 
+function shutdown_standby {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+sqlplus -S / as sysdba << EOF
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   shutdown immediate
+   exit;
+EOF
+}
+
 function err_exit {
    if [ -n "$1" ]; then
       echo "[!] Error: $1"
    else
       print_usage
+   fi
+
+   if [ "$REMOTE_SIDE" -eq 1 ]; then
+      shutdown_standby
    fi
    exit 1
 }
@@ -436,10 +455,11 @@ if [ $? -eq 0 ]; then
    info_msg "SID_LIST_LISTENER already configured"
 else
 cat <<EOF >> $LISTENER_CONFIG
+
 SID_LIST_LISTENER =
   (SID_LIST =
     (SID_DESC =
-      (GLOBAL_DBNAME = ${PRIMARY_SID^^}_STB_DGMGRL)
+      (GLOBAL_DBNAME = ${PRIMARY_SID}_stb_DGMGRL)
       (ORACLE_HOME = $ORACLE_HOME)
       (SID_NAME = $PRIMARY_SID)
     )
@@ -448,7 +468,7 @@ SID_LIST_LISTENER =
 EOF
 fi
 
-[ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
+lsnrctl reload
 
 }
 
