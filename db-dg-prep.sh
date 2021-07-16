@@ -20,7 +20,7 @@ sqlplus -S / as sysdba << EOF
    set heading off;
    set pagesize 0;
    set feedback off;
-   shutdown immediate
+   shutdown abort
    exit;
 EOF
 }
@@ -459,7 +459,7 @@ cat <<EOF >> $LISTENER_CONFIG
 SID_LIST_LISTENER =
   (SID_LIST =
     (SID_DESC =
-      (GLOBAL_DBNAME = ${PRIMARY_SID}_stb_DGMGRL)
+      (GLOBAL_DBNAME = ${PRIMARY_SID}_stb)
       (ORACLE_HOME = $ORACLE_HOME)
       (SID_NAME = $PRIMARY_SID)
     )
@@ -500,7 +500,7 @@ fi
 
 rman <<EOF
 connect target sys/${ORACLE_PWD}@${PRIMARY_SID}
-connect auxiliary /
+connect auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_stb
 DUPLICATE TARGET DATABASE
   FOR STANDBY
   FROM ACTIVE DATABASE
