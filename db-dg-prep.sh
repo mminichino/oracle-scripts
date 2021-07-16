@@ -610,6 +610,7 @@ fi
 
 function drop_standby {
 [ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+[ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME not set."
 export ORACLE_SID=$PRIMARY_SID
 
 which sqlplus 2>&1 >/dev/null
@@ -675,6 +676,18 @@ echo "Removing database files ..."
 [[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora
 [[ -z "$ORACLE_BASE" ]] && exit
 [[ -d $ORACLE_BASE/diag/rdbms/${ORACLE_SID} ]] && rm -rf $ORACLE_BASE/diag/rdbms/${ORACLE_SID}
+
+if [ -f $ORACLE_HOME/network/admin/tnsnames.ora ]; then
+   echo "Cleaning tnsnames.ora"
+   sed -i -e "/$ORACLE_SID.*=/,/^ *\$/d" $ORACLE_HOME/network/admin/tnsnames.ora
+fi
+
+LISTENER_CONFIG=$(lsnrctl status | grep "^Listener Parameter File" | awk '{print $NF}')
+
+if [ -n "$LISTENER_CONFIG" ]; then
+   echo "Cleaning listener.ora"
+   sed -i -e "/SID_LIST_LISTENER.*=/,/^ *\$/d" $LISTENER_CONFIG
+fi
 
 echo "Done."
 }
