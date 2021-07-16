@@ -517,5 +517,5 @@ if [ "$REMOTE_SIDE" -eq 0 ]; then
 else
    get_password
    listener_standby_config
-#   standby_rman
+   standby_rman
 fi
