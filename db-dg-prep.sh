@@ -3,11 +3,14 @@
 unset PRIMARY_SID
 unset REMOTE_HOST
 REMOTE_SIDE=0
+DG_STOP=0
 
 function print_usage {
    echo "Usage: $0 -p SID -h remote_host"
    echo "          -p Oracle primary SID"
-   echo "          -h Oracle standby database host"
+   echo "          -h Remote database host"
+   echo "          -r Standby side mode"
+   echo "          -k Stop sync"
 }
 
 function shutdown_standby {
@@ -337,7 +340,7 @@ else
 fi
 }
 
-function listener_remote_config {
+function listener_primary_config {
 
 [ -z "$PRIMARY_SID" ] && err_exit "Standby SID not set"
 [ -z "$REMOTE_HOST" ] && err_exit "Remote host not set"
@@ -364,9 +367,10 @@ fi
 
 echo "Configuring instance ${PRIMARY_SID}_STB on node $REMOTE_HOST"
 
-grep -i ${PRIMARY_SID}_STB $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
-[ $? -eq 0 ] && info_msg "Instance ${PRIMARY_SID}_STB already configured" && return
-
+grep -iw ^${PRIMARY_SID}_STB $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
+if [ $? -eq 0 ]; then
+   info_msg "Instance ${PRIMARY_SID}_STB already configured"
+else
 cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
 ${PRIMARY_SID^^}_STB =
   (DESCRIPTION =
@@ -378,8 +382,27 @@ ${PRIMARY_SID^^}_STB =
   )
 
 EOF
+fi
 
-[ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
+grep -iw ^SID_LIST_LISTENER $LISTENER_CONFIG 2>&1 >/dev/null
+if [ $? -eq 0 ]; then
+   info_msg "SID_LIST_LISTENER already configured"
+else
+cat <<EOF >> $LISTENER_CONFIG
+
+SID_LIST_LISTENER =
+  (SID_LIST =
+    (SID_DESC =
+      (GLOBAL_DBNAME = $PRIMARY_SID)
+      (ORACLE_HOME = $ORACLE_HOME)
+      (SID_NAME = $PRIMARY_SID)
+    )
+  )
+
+EOF
+fi
+
+lsnrctl reload
 
 }
 
@@ -450,7 +473,7 @@ ${PRIMARY_SID} =
 EOF
 fi
 
-grep -iw ^SID_LIST_${PRIMARY_SID^^}_STB $LISTENER_CONFIG 2>&1 >/dev/null
+grep -iw ^SID_LIST_LISTENER $LISTENER_CONFIG 2>&1 >/dev/null
 if [ $? -eq 0 ]; then
    info_msg "SID_LIST_LISTENER already configured"
 else
@@ -523,6 +546,8 @@ sqlplus -S / as sysdba << EOF
    set pagesize 0;
    set feedback off;
    alter database recover managed standby database disconnect;
+   alter system set fal_server=${PRIMARY_SID};
+   alter system set log_archive_dest_2='service=${PRIMARY_SID} noaffirm async valid_for=(online_logfiles,primary_role) db_unique_name=${PRIMARY_SID}';
    exit;
 EOF
 if [ $? -ne 0 ]; then
@@ -533,7 +558,50 @@ fi
 
 }
 
-while getopts "p:h:r" opt
+function dg_stop {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+which sqlplus 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "sqlplus not found"
+
+if [ "$REMOTE_SIDE" -eq 1 ]; then
+echo "Disabling DataGuard on standby ..."
+sqlplus -S / as sysdba << EOF
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   alter database recover managed standby database cancel;
+   alter system set log_archive_dest_state_2='DEFER';
+   exit;
+EOF
+if [ $? -ne 0 ]; then
+   err_exit "Failed to disable DataGuard"
+else
+   echo "Done."
+fi
+else
+echo "Disabling DataGuard on primary ..."
+sqlplus -S / as sysdba << EOF
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   alter system set log_archive_dest_state_2='DEFER';
+   exit;
+EOF
+if [ $? -ne 0 ]; then
+   err_exit "Failed to disable DataGuard"
+else
+   echo "Done."
+fi
+fi
+}
+
+while getopts "p:h:rk" opt
 do
   case $opt in
     p)
@@ -545,6 +613,9 @@ do
     r)
       REMOTE_SIDE=1
       ;;
+    k)
+      DG_STOP=1
+      ;;
     \?)
       print_usage
       exit 1
@@ -554,11 +625,16 @@ done
 
 [ -z "$PRIMARY_SID" ] && err_exit "Primary SID is required"
 
+if [ "$DG_STOP" -eq 1 ]; then
+   dg_stop
+   exit 0
+fi
+
 if [ "$REMOTE_SIDE" -eq 0 ]; then
    get_db_path
    create_pfile
    copy_to_remote
-   listener_remote_config
+   listener_primary_config
    set_primary_db_parameters
    create_standby_logs
 else
