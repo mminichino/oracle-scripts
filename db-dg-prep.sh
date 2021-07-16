@@ -389,6 +389,10 @@ else
    err_exit "Listener not running - Please configure and start the listener."
 fi
 
+LISTENER_CONFIG=$(lsnrctl status | grep "^Listener Parameter File" | awk '{print $NF}')
+
+[ -z "$LISTENER_CONFIG" ] && err_exit "Can not find listener config file"
+
 LOCAL_HOSTNAME=$(hostname -f)
 
 echo "Configuring instances $PRIMARY_SID on node $REMOTE_HOST and ${PRIMARY_SID}_STB on node $LOCAL_HOSTNAME"
@@ -427,6 +431,23 @@ ${PRIMARY_SID^^} =
 EOF
 fi
 
+grep -iw ^SID_LIST_LISTENER $LISTENER_CONFIG 2>&1 >/dev/null
+if [ $? -eq 0 ]; then
+   info_msg "SID_LIST_LISTENER already configured"
+else
+cat <<EOF >> $LISTENER_CONFIG
+SID_LIST_LISTENER =
+  (SID_LIST =
+    (SID_DESC =
+      (GLOBAL_DBNAME = ${PRIMARY_SID^^}_STB_DGMGRL)
+      (ORACLE_HOME = $ORACLE_HOME)
+      (SID_NAME = $PRIMARY_SID)
+    )
+  )
+
+EOF
+fi
+
 [ $LSNR_RUNNING -eq 1 ] && lsnrctl reload
 
 }
@@ -458,8 +479,8 @@ else
 fi
 
 rman <<EOF
-connect target sys/${ORACLE_PWD}@$PRIMARY_SID
-connect auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_STB
+connect target sys/${ORACLE_PWD}@${PRIMARY_SID}
+connect auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_stb
 duplicate target database for standby from active database nofilenamecheck;
 EOF
 if [ $? -ne 0 ]; then
