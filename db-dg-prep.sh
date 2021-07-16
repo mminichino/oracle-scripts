@@ -228,6 +228,33 @@ else
 fi
 fi
 
+FB_STATUS=$(sqlplus -S / as sysdba << EOF
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   select flashback_on from v\$database;
+   exit;
+EOF
+)
+
+if [ "$FB_STATUS" == "NO" ]; then
+echo -n "Enabling flashback ..."
+sqlplus -S / as sysdba << EOF
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   alter database flashback on;
+   exit;
+EOF
+if [ $? -ne 0 ]; then
+   err_exit "Failed to enable flashback"
+else
+   echo "Done."
+fi
+fi
+
 echo -n "Creating pfile ..."
 sqlplus -S / as sysdba << EOF
    set heading off;
