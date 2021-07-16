@@ -456,19 +456,12 @@ if [ $? -eq 0 ]; then
 else
 cat <<EOF >> $LISTENER_CONFIG
 
-SID_LIST_${PRIMARY_SID^^}_STB =
+SID_LIST_LISTENER =
   (SID_LIST =
     (SID_DESC =
       (GLOBAL_DBNAME = $PRIMARY_SID)
       (ORACLE_HOME = $ORACLE_HOME)
       (SID_NAME = $PRIMARY_SID)
-    )
-  )
-
-${PRIMARY_SID^^}_STB =
-  (DESCRIPTION_LIST =
-    (DESCRIPTION =
-      (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
     )
   )
 
