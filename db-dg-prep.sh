@@ -505,6 +505,8 @@ which sqlplus 2>&1 >/dev/null
 which rman 2>&1 >/dev/null
 [ $? -ne 0 ] && err_exit "rman not found"
 
+LOCAL_HOSTNAME=$(hostname -f)
+
 echo "Starting standby database not mounted ..."
 sqlplus -S / as sysdba << EOF
    whenever sqlerror exit sql.sqlcode
@@ -548,6 +550,7 @@ sqlplus -S / as sysdba << EOF
    alter database recover managed standby database disconnect;
    alter system set fal_server=${PRIMARY_SID};
    alter system set log_archive_dest_2='service=${PRIMARY_SID} noaffirm async valid_for=(online_logfiles,primary_role) db_unique_name=${PRIMARY_SID}';
+   alter system set local_listener = '(ADDRESS=(PROTOCOL=TCP)(HOST=$LOCAL_HOSTNAME)(PORT=1521))' ;
    exit;
 EOF
 if [ $? -ne 0 ]; then
@@ -575,6 +578,8 @@ sqlplus -S / as sysdba << EOF
    set feedback off;
    alter database recover managed standby database cancel;
    alter system set log_archive_dest_state_2='DEFER';
+   alter database activate standby database;
+   alter database open ;
    exit;
 EOF
 if [ $? -ne 0 ]; then
@@ -590,6 +595,7 @@ sqlplus -S / as sysdba << EOF
    set heading off;
    set pagesize 0;
    set feedback off;
+   alter system archive log current;
    alter system set log_archive_dest_state_2='DEFER';
    exit;
 EOF
