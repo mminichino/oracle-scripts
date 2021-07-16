@@ -500,8 +500,14 @@ fi
 
 rman <<EOF
 connect target sys/${ORACLE_PWD}@${PRIMARY_SID}
-connect auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_stb
-duplicate target database for standby from active database nofilenamecheck;
+connect auxiliary /
+DUPLICATE TARGET DATABASE
+  FOR STANDBY
+  FROM ACTIVE DATABASE
+  DORECOVER
+  SPFILE
+    SET db_unique_name='${PRIMARY_SID}_stb' COMMENT 'Is standby'
+  NOFILENAMECHECK;
 EOF
 if [ $? -ne 0 ]; then
    err_exit "RMAN clone to standby database failed"
