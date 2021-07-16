@@ -4,6 +4,7 @@ unset PRIMARY_SID
 unset REMOTE_HOST
 REMOTE_SIDE=0
 DG_STOP=0
+DROP_DB=0
 
 function print_usage {
    echo "Usage: $0 -p SID -h remote_host"
@@ -607,7 +608,78 @@ fi
 fi
 }
 
-while getopts "p:h:rk" opt
+function drop_standby {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+which sqlplus 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "sqlplus not found"
+
+echo "ORACLE HOME   = $ORACLE_HOME"
+echo "ORACLE SID    = $ORACLE_SID"
+
+echo "This will permanently delete SID $ORACLE_SID !!!"
+echo -n "Are you sure? [Y/N]? "
+read ANSWER
+
+if [ "$ANSWER" != "Y" ]
+then
+   echo "Aborting ..."
+   exit 1
+fi
+
+which crsctl > /dev/null 2>&1
+
+if [ "$?" -eq 0 ]
+then
+   echo "CRS found ... Removing restart for instance ..."
+   CRSVERSION=$(srvctl -version | awk '{print $NF}' | sed -e 's/^\([0-9]*\)\..*$/\1/')
+   if [ "$CRSVERSION" -lt 12 ]; then
+      srvctl remove database -d $ORACLE_SID -f -y
+   else
+      srvctl remove database -db $ORACLE_SID -force -noprompt
+   fi
+   echo "Done."
+fi
+
+echo "Shutting database down... "
+
+sqlplus / as sysdba <<EOF
+SHUTDOWN ABORT
+EOF
+
+echo "Done."
+echo "Deleting database... "
+
+rman <<EOF
+connect target /
+STARTUP FORCE MOUNT
+SQL 'ALTER SYSTEM ENABLE RESTRICTED SESSION';
+DROP DATABASE INCLUDING BACKUPS NOPROMPT;
+EOF
+
+echo "Done."
+echo "Shutting instance down... "
+
+sqlplus / as sysdba <<EOF
+SHUTDOWN ABORT
+EOF
+
+echo "Done."
+echo "Removing database files ..."
+
+[[ -z "$ORACLE_SID" ]] && exit
+[[ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+[[ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ]] && rm $ORACLE_HOME/dbs/orapw${ORACLE_SID}
+[[ -f $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat ]] && rm $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat
+[[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora
+[[ -z "$ORACLE_BASE" ]] && exit
+[[ -d $ORACLE_BASE/diag/rdbms/${ORACLE_SID} ]] && rm -rf $ORACLE_BASE/diag/rdbms/${ORACLE_SID}
+
+echo "Done."
+}
+
+while getopts "p:h:rkd" opt
 do
   case $opt in
     p)
@@ -622,6 +694,9 @@ do
     k)
       DG_STOP=1
       ;;
+    d)
+      DROP_DB=1
+      ;;
     \?)
       print_usage
       exit 1
@@ -633,6 +708,11 @@ done
 
 if [ "$DG_STOP" -eq 1 ]; then
    dg_stop
+   exit 0
+fi
+
+if [ "$DROP_DB" -eq 1 -a "$REMOTE_SIDE" -eq 1 ]; then
+   drop_standby
    exit 0
 fi
 
