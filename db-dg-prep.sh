@@ -389,7 +389,9 @@ else
    err_exit "Listener not running - Please configure and start the listener."
 fi
 
-echo "Configuring instances $PRIMARY_SID and ${PRIMARY_SID}_STB on node $REMOTE_HOST"
+LOCAL_HOSTNAME=$(hostname -f)
+
+echo "Configuring instances $PRIMARY_SID on node $REMOTE_HOST and ${PRIMARY_SID}_STB on node $LOCAL_HOSTNAME"
 
 grep -i ${PRIMARY_SID}_STB $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
 if [ $? -eq 0 ]; then
@@ -398,7 +400,7 @@ else
 cat <<EOF >> $ORACLE_HOME/network/admin/tnsnames.ora
 ${PRIMARY_SID^^}_STB =
   (DESCRIPTION =
-    (ADDRESS = (PROTOCOL = TCP)(HOST = $REMOTE_HOST)(PORT = 1521))
+    (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
     (CONNECT_DATA =
       (SERVER = DEDICATED)
       (SERVICE_NAME = $PRIMARY_SID)
