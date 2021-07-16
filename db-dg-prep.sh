@@ -462,6 +462,11 @@ connect target sys/${ORACLE_PWD}@$PRIMARY_SID
 connect auxiliary sys/${ORACLE_PWD}@${PRIMARY_SID}_STB
 duplicate target database for standby from active database nofilenamecheck;
 EOF
+if [ $? -ne 0 ]; then
+   err_exit "RMAN clone to standby database failed"
+else
+   echo "Done."
+fi
 
 echo "Enabling recovery ..."
 sqlplus -S / as sysdba << EOF
