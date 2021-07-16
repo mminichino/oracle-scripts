@@ -393,7 +393,7 @@ LOCAL_HOSTNAME=$(hostname -f)
 
 echo "Configuring instances $PRIMARY_SID on node $REMOTE_HOST and ${PRIMARY_SID}_STB on node $LOCAL_HOSTNAME"
 
-grep -i ${PRIMARY_SID}_STB $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
+grep -iw ^${PRIMARY_SID}_STB $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
 if [ $? -eq 0 ]; then
    info_msg "Instance ${PRIMARY_SID}_STB already configured"
 else
@@ -410,7 +410,7 @@ ${PRIMARY_SID^^}_STB =
 EOF
 fi
 
-grep -i $PRIMARY_SID $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
+grep -iw ^${PRIMARY_SID} $ORACLE_HOME/network/admin/tnsnames.ora 2>&1 >/dev/null
 if [ $? -eq 0 ]; then
    info_msg "Instance $PRIMARY_SID already configured"
 else
