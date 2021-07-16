@@ -450,18 +450,25 @@ ${PRIMARY_SID} =
 EOF
 fi
 
-grep -iw ^SID_LIST_LISTENER $LISTENER_CONFIG 2>&1 >/dev/null
+grep -iw ^SID_LIST_${PRIMARY_SID^^}_STB $LISTENER_CONFIG 2>&1 >/dev/null
 if [ $? -eq 0 ]; then
    info_msg "SID_LIST_LISTENER already configured"
 else
 cat <<EOF >> $LISTENER_CONFIG
 
-SID_LIST_LISTENER =
+SID_LIST_${PRIMARY_SID^^}_STB =
   (SID_LIST =
     (SID_DESC =
-      (GLOBAL_DBNAME = ${PRIMARY_SID}_stb)
+      (GLOBAL_DBNAME = $PRIMARY_SID)
       (ORACLE_HOME = $ORACLE_HOME)
       (SID_NAME = $PRIMARY_SID)
+    )
+  )
+
+${PRIMARY_SID^^}_STB =
+  (DESCRIPTION_LIST =
+    (DESCRIPTION =
+      (ADDRESS = (PROTOCOL = TCP)(HOST = $LOCAL_HOSTNAME)(PORT = 1521))
     )
   )
 
