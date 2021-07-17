@@ -412,6 +412,10 @@ ${PRIMARY_SID^^}_STB =
 EOF
 fi
 
+LISTENER_CONFIG=$(lsnrctl status | grep "^Listener Parameter File" | awk '{print $NF}')
+
+[ -z "$LISTENER_CONFIG" ] && err_exit "Can not find listener config file"
+
 grep -iw ^SID_LIST_LISTENER $LISTENER_CONFIG 2>&1 >/dev/null
 if [ $? -eq 0 ]; then
    info_msg "SID_LIST_LISTENER already configured"
