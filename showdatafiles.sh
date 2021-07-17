@@ -12,9 +12,11 @@ EOF
 sqlplus -S / as sysdba<<EOF
 set linesize 200
 column name format a60
-column member format a40
+column member format a50
 select file#,name,ts#,bytes from v\$datafile ;
 select file#,name,ts#,bytes from v\$tempfile ;
 select * from v\$tablespace ;
 select group#,status,member from v\$logfile ;
 EOF
+
+##
