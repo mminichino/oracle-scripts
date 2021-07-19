@@ -14,7 +14,7 @@ function err_exit {
    exit 1
 }
 
-function start-db {
+function start_db {
 which sqlplus 2>&1 >/dev/null
 [ $? -ne 0 ] && err_exit "sqlplus not found"
 
@@ -43,7 +43,7 @@ do
     if [ -d "$homePath" ]; then
        ORACLE_SID=$(echo $line | cut -d: -f1)
        if [ -n "$(echo $ORACLE_SID | sed -e 's/^+.*$//')" ]; then
-          start-db $ORACLE_SID
+          start_db $ORACLE_SID
        fi
     fi
 done
