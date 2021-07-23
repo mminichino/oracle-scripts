@@ -1,13 +1,7 @@
 #!/bin/sh
-
-function err_exit {
-   if [ -n "$1" ]; then
-      echo "$1"
-   else
-      echo "Usage: $0 -o | -f"
-   fi
-   exit 1
-}
+#
+SCRIPTDIR=$(cd $(dirname $0) && pwd)
+source $SCRIPTDIR/lib/libcommon.sh
 
 if [ -z "$ORACLE_HOME" ]
 then
@@ -19,7 +13,7 @@ then
    echo "Can not find lib directory in Oracle home."
 fi
 
-while getopts "of" opt
+while getopts "ofc" opt
 do
   case $opt in
     o)
@@ -32,9 +26,16 @@ do
       cd $ORACLE_HOME/rdbms/lib
       make -f ins_rdbms.mk dnfs_off
       ;;
+    c)
+      find /opt/app/oracle/product/19.3.0/dbhome_1/rdbms/lib/odm -name libnfsodm\* >/dev/null 2>&1
+      if [ $? -eq 0 ]; then
+         info_msg "dNFS is enabled."
+      else
+         info_msg "dNFS is off."
+      fi
+      ;;
     \?)
       err_exit
       ;;
   esac
 done
-

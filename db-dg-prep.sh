@@ -1,17 +1,35 @@
 #!/bin/sh
 #
+SCRIPTDIR=$(cd $(dirname $0) && pwd)
+source $SCRIPTDIR/lib/libcommon.sh
 unset PRIMARY_SID
 unset REMOTE_HOST
 REMOTE_SIDE=0
 DG_STOP=0
 DROP_DB=0
+PRINT_USAGE="Usage: $0 -p SID -h remote_host
+          -p Oracle primary SID
+          -h Remote database host
+          -r Standby side mode
+          -k Stop sync
+          -c Check logical standby compatibility
+          -s Stop redo apply on standby
+          -m Build Log Miner directory on primary
+          -l Open logical standby database"
 
-function print_usage {
-   echo "Usage: $0 -p SID -h remote_host"
-   echo "          -p Oracle primary SID"
-   echo "          -h Remote database host"
-   echo "          -r Standby side mode"
-   echo "          -k Stop sync"
+function check_logical_standby_support {
+sqlCommand="column table_name format a30
+column column_name format a30
+column data_type format a20
+select table_name, column_name, data_type from dba_logstdby_unsupported ;"
+
+result=$(run_query "$sqlCommand")
+
+if [ -z "$result" ]; then
+   info_msg "No unsupported objects found."
+else
+   echo "$result"
+fi
 }
 
 function shutdown_standby {
@@ -27,49 +45,6 @@ sqlplus -S / as sysdba << EOF
    shutdown abort
    exit;
 EOF
-}
-
-function err_exit {
-   if [ -n "$1" ]; then
-      echo "[!] Error: $1"
-   else
-      print_usage
-   fi
-
-   if [ "$REMOTE_SIDE" -eq 1 ]; then
-      shutdown_standby
-   fi
-   exit 1
-}
-
-function warn_msg {
-   if [ -n "$1" ]; then
-      echo "[i] Warning: $1"
-   fi
-}
-
-function info_msg {
-   if [ -n "$1" ]; then
-      echo "[i] Notice: $1"
-   fi
-}
-
-function get_password {
-   while true
-   do
-      echo -n "Password: "
-      read -s PASSWORD
-      echo ""
-      echo -n "Retype Password: "
-      read -s CHECK_PASSWORD
-      echo ""
-      if [ "$PASSWORD" != "$CHECK_PASSWORD" ]; then
-         echo "Passwords do not match"
-      else
-         break
-      fi
-   done
-   export ORACLE_PWD=$PASSWORD
 }
 
 function get_db_path {
@@ -593,6 +568,64 @@ fi
 
 }
 
+function db_stop_apply {
+sqlCommand="alter database recover managed standby database cancel ;"
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+if [ "$REMOTE_SIDE" -ne 1 ]; then
+   err_exit "Redo apply stop should be run from the standby side."
+fi
+
+echo -n "Stopping redo apply on instance $ORACLE_SID ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+}
+
+function db_prep_primary_logical {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+if [ "$REMOTE_SIDE" -eq 1 ]; then
+   err_exit "Prep should be performed on the primary side."
+fi
+
+sqlCommand="exec dbms_logstdby.build"
+echo -n "Building Log Miner directory on instance $ORACLE_SID ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+echo "$result"
+}
+
+function db_open_logical_standby {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+if [ "$REMOTE_SIDE" -ne 1 ]; then
+   err_exit "Database open should be performed on the standby side."
+fi
+
+sqlCommand="alter database recover to logical standby ${ORACLE_SID}_stb;"
+echo -n "Converting instance ${ORACLE_SID}_stb to logical standby ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+
+sqlCommand="shutdown immediate"
+echo -n "Shutting instance down ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+
+sqlCommand="startup mount"
+echo -n "Starting instance ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+
+sqlCommand="alter database open resetlogs;"
+echo -n "Opening database ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+}
+
 function dg_stop {
 [ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
 export ORACLE_SID=$PRIMARY_SID
@@ -722,7 +755,7 @@ fi
 echo "Done."
 }
 
-while getopts "p:h:rkd" opt
+while getopts "p:h:rkdcsml" opt
 do
   case $opt in
     p)
@@ -739,6 +772,22 @@ do
       ;;
     d)
       DROP_DB=1
+      ;;
+    c)
+      check_logical_standby_support
+      exit 0
+      ;;
+    s)
+      db_stop_apply
+      exit 0
+      ;;
+    m)
+      db_prep_primary_logical
+      exit 0
+      ;;
+    l)
+      db_open_logical_standby
+      exit 0
       ;;
     \?)
       print_usage
