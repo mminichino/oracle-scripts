@@ -608,12 +608,10 @@ export ORACLE_SID=$PRIMARY_SID
 if [ "$REMOTE_SIDE" -ne 1 ]; then
    err_exit "Database open should be performed on the standby side."
 fi
-#QUERY_DEBUG=1
-#QUERY_DEBUG_EXIT=1
 
 echo "Converting instance ${ORACLE_SID}_stb to logical standby ..."
 
-sqlCommand="alter database recover to logical standby ${ORACLE_SID}stb;"
+sqlCommand="alter database recover to logical standby ${ORACLE_SID} ;"
 run_query "$sqlCommand"
 
 sqlCommand="shutdown immediate;
