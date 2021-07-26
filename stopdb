@@ -1,19 +1,10 @@
 #!/bin/sh
 #
+SCRIPTDIR=$(cd $(dirname $0) && pwd)
+source $SCRIPTDIR/lib/libcommon.sh
 YES=0
-
-function err_exit {
-   if [ -n "$1" ]; then
-      echo "$1"
-   else
-      echo "Usage: $0 [ -s ORACLE_SID | -y ]"
-   fi
-   if [ -n "$2" ]; then
-      exit $2
-   else
-      exit 1
-   fi
-}
+SKIPENV=0
+SHUTDOWN_MODE="immediate"
 
 while getopts "s:y" opt
 do
@@ -24,18 +15,25 @@ do
     y)
       YES=1
       ;;
+    e)
+      SKIPENV=1
+      ;;
+    f)
+      SHUTDOWN_MODE="abort"
+      ;;
     \?)
       err_exit
       ;;
   esac
 done
 
-if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
-   err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+if [ "$SKIPENV" -eq 0 ]; then
+   if [ -z "$(cut -d: -f 1 /etc/oratab | grep $ORACLE_SID)" ]; then
+      err_exit "DB Instance $ORACLE_SID not found in /etc/oratab."
+   fi
+   ORAENV_ASK=NO
+   source oraenv
 fi
-
-ORAENV_ASK=NO
-source oraenv
 
 if [ "$YES" -ne 1 ]; then
    echo -n "Shutdown database $ORACLE_SID [y/n]? "
@@ -50,16 +48,7 @@ if [ -z "$(ps -ef |grep ora_pmon_$ORACLE_SID | grep -v grep | awk '{print $NF}')
    exit
 fi
 
-sqlplus -S / as sysdba <<EOF
-whenever sqlerror exit 1
-set heading off;
-set pagesize 0;
-set feedback off;
-shutdown immediate
-EOF
-
-if [ "$?" -eq 0 ]; then
-   echo "$ORACLE_SID shutdown"
-else
-   err_exit "Database not shutdown."
-fi
+sqlCommand="shutdown $SHUTDOWN_MODE"
+echo -n "Shutting instance $ORACLE_SID down ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
