@@ -597,7 +597,6 @@ sqlCommand="exec dbms_logstdby.build"
 echo -n "Building Log Miner directory on instance $ORACLE_SID ..."
 result=$(run_query "$sqlCommand")
 echo "Done."
-echo "$result"
 }
 
 function db_open_logical_standby {
@@ -627,6 +626,22 @@ sqlCommand="alter database open resetlogs;"
 echo -n "Opening database ..."
 result=$(run_query "$sqlCommand")
 echo "Done."
+
+sqlCommand="alter database start logical standby apply immediate;"
+echo -n "Starting apply service ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+}
+
+function db_status_check {
+[ -z "$PRIMARY_SID" ] && err_exit "Primary SID not set"
+export ORACLE_SID=$PRIMARY_SID
+
+sqlCommand="select db_unique_name || ' | ' || open_mode || ' | ' || database_role from v\$database ;"
+echo -n "Checking database status ..."
+result=$(run_query "$sqlCommand")
+echo "Done."
+echo "$result"
 }
 
 function dg_stop {
@@ -758,7 +773,7 @@ fi
 echo "Done."
 }
 
-while getopts "p:h:rkdcsml" opt
+while getopts "p:h:rkdcsmlq" opt
 do
   case $opt in
     p)
@@ -776,8 +791,12 @@ do
     d)
       DROP_DB=1
       ;;
-    c)
+    q)
       check_logical_standby_support
+      exit 0
+      ;;
+    c)
+      db_status_check
       exit 0
       ;;
     s)
@@ -810,6 +829,7 @@ fi
 
 if [ "$OPEN_LOGICAL" -eq 1 ]; then
    db_open_logical_standby
+   db_status_check
    exit 0
 fi
 
