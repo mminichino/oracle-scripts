@@ -18,7 +18,8 @@ PRINT_USAGE="Usage: $0 -p SID -h remote_host
           -c Check logical standby compatibility
           -s Stop redo apply on standby
           -m Build Log Miner directory on primary
-          -l Open logical standby database"
+          -l Open logical standby database
+          -d Drop database"
 
 function check_logical_standby_support {
 sqlCommand="column table_name format a30
