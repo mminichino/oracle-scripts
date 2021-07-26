@@ -6,7 +6,7 @@ YES=0
 SKIPENV=0
 SHUTDOWN_MODE="immediate"
 
-while getopts "s:y" opt
+while getopts "s:yef" opt
 do
   case $opt in
     s)
