@@ -833,6 +833,7 @@ if [ "$DROP_DB" -eq 1 ]; then
 fi
 
 if [ "$PUSH_FILES_TO_REMOTE" -eq 1 ]; then
+   get_db_path
    copy_to_remote
    exit 0
 fi
