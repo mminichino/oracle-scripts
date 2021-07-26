@@ -7,6 +7,9 @@ unset REMOTE_HOST
 REMOTE_SIDE=0
 DG_STOP=0
 DROP_DB=0
+STOP_APPLY=0
+PREP_LOGICAL=0
+OPEN_LOGICAL=0
 PRINT_USAGE="Usage: $0 -p SID -h remote_host
           -p Oracle primary SID
           -h Remote database host
@@ -778,16 +781,13 @@ do
       exit 0
       ;;
     s)
-      db_stop_apply
-      exit 0
+      STOP_APPLY=1
       ;;
     m)
-      db_prep_primary_logical
-      exit 0
+      PREP_LOGICAL=1
       ;;
     l)
-      db_open_logical_standby
-      exit 0
+      OPEN_LOGICAL=1
       ;;
     \?)
       print_usage
@@ -797,6 +797,21 @@ do
 done
 
 [ -z "$PRIMARY_SID" ] && err_exit "Primary SID is required"
+
+if [ "$STOP_APPLY" -eq 1 ]; then
+   db_stop_apply
+   exit 0
+fi
+
+if [ "$PREP_LOGICAL" -eq 1 ]; then
+   db_prep_primary_logical
+   exit 0
+fi
+
+if [ "$OPEN_LOGICAL" -eq 1 ]; then
+   db_open_logical_standby
+   exit 0
+fi
 
 if [ "$DG_STOP" -eq 1 ]; then
    dg_stop
