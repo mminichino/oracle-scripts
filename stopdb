@@ -5,6 +5,11 @@ source $SCRIPTDIR/lib/libcommon.sh
 YES=0
 SKIPENV=0
 SHUTDOWN_MODE="immediate"
+PRINT_USAGE="Usage: $0 -s SID [ -y | -e | -f ]
+           -s Oracle SID
+           -y Assume yes response to confirmation prompt
+           -e Skip environment setup (current environment must be setup)
+           -f Force shutdown (shutdown abort)"
 
 while getopts "s:yef" opt
 do
