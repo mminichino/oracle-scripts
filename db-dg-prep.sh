@@ -839,7 +839,7 @@ if [ "$DG_STOP" -eq 1 ]; then
    exit 0
 fi
 
-if [ "$DROP_DB" -eq 1 -a "$REMOTE_SIDE" -eq 1 ]; then
+if [ "$DROP_DB" -eq 1 ]; then
    drop_standby
    exit 0
 fi
