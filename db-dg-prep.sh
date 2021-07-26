@@ -614,8 +614,10 @@ echo "Converting instance ${ORACLE_SID}_stb to logical standby ..."
 sqlCommand="alter database recover to logical standby ${ORACLE_SID} ;"
 run_query "$sqlCommand"
 
+IGNORE_SQL_ERROR=1
 sqlCommand="shutdown immediate"
 run_query "$sqlCommand"
+IGNORE_SQL_ERROR=0
 
 sqlCommand="startup mount"
 run_query "$sqlCommand"

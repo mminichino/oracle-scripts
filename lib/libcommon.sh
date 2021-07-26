@@ -49,6 +49,10 @@ function get_password {
 function run_query {
 [ -z "$1" ] && err_exit "run_query: query text argument can not be empty."
 
+if [ -z "$IGNORE_SQL_ERROR" ]; then
+   IGNORE_SQL_ERROR=0
+fi
+
 if [ -n "$QUERY_DEBUG" ]; then
 if [ "$QUERY_DEBUG" -eq 1 ]; then
 echo "[debug] ==== Begin Query Text ====" 1>&2
@@ -80,7 +84,7 @@ set feedback off;
 $1
 exit;
 EOF
-if [ $? -ne 0 ]; then
+if [ $? -ne 0 -a $IGNORE_SQL_ERROR -eq 0 ]; then
    err_exit "Query execution failed: $1"
 fi
 }
