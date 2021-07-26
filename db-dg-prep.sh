@@ -613,7 +613,7 @@ fi
 
 echo "Converting instance ${ORACLE_SID}_stb to logical standby ..."
 
-sqlCommand="alter database recover to logical standby ${ORACLE_SID}_stb ;"
+sqlCommand="alter database recover to logical standby ${ORACLE_SID}stb;"
 run_query "$sqlCommand"
 
 sqlCommand="shutdown immediate;
