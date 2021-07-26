@@ -52,7 +52,7 @@ function run_query {
 if [ -n "$QUERY_DEBUG" ]; then
 if [ "$QUERY_DEBUG" -eq 1 ]; then
 echo "[debug] ==== Begin Query Text ====" 1>&2
-cat << EOF 1>&2
+cat -nvET << EOF 1>&2
 whenever sqlerror exit sql.sqlcode
 whenever oserror exit
 set heading off;
