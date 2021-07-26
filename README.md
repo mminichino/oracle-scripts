@@ -33,3 +33,15 @@ To remove a database:
 ````
 $ ./db-delete.sh -s demodb
 ````
+
+To setup Data Guard:
+
+On the primary side:
+````
+$ ./db-dg-prep.sh -p oracle_sid -h remote_host_name
+````
+
+On the secondary side:
+````
+$ ./db-dg-prep.sh -p oracle_sid -h primary_host_name -r
+````

@@ -10,6 +10,7 @@ DROP_DB=0
 STOP_APPLY=0
 PREP_LOGICAL=0
 OPEN_LOGICAL=0
+PUSH_FILES_TO_REMOTE=0
 PRINT_USAGE="Usage: $0 -p SID -h remote_host
           -p Oracle primary SID
           -h Remote database host
@@ -608,29 +609,13 @@ if [ "$REMOTE_SIDE" -ne 1 ]; then
    err_exit "Database open should be performed on the standby side."
 fi
 
-sqlCommand="alter database recover to logical standby ${ORACLE_SID}_stb;"
-echo -n "Converting instance ${ORACLE_SID}_stb to logical standby ..."
-result=$(run_query "$sqlCommand")
-echo "Done."
-
-sqlCommand="shutdown immediate"
-echo -n "Shutting instance down ..."
-result=$(run_query "$sqlCommand")
-echo "Done."
-
-sqlCommand="startup mount"
-echo -n "Starting instance ..."
-result=$(run_query "$sqlCommand")
-echo "Done."
-
-sqlCommand="alter database open resetlogs;"
-echo -n "Opening database ..."
-result=$(run_query "$sqlCommand")
-echo "Done."
-
-sqlCommand="alter database start logical standby apply immediate;"
-echo -n "Starting apply service ..."
-result=$(run_query "$sqlCommand")
+sqlCommand="alter database recover to logical standby ${ORACLE_SID}_stb;
+shutdown immediate
+startup mount
+alter database open resetlogs;
+alter database start logical standby apply immediate;"
+echo "Converting instance ${ORACLE_SID}_stb to logical standby ..."
+run_query "$sqlCommand"
 echo "Done."
 }
 
@@ -774,7 +759,7 @@ fi
 echo "Done."
 }
 
-while getopts "p:h:rkdcsmlq" opt
+while getopts "p:h:rkdcsmlqx" opt
 do
   case $opt in
     p)
@@ -809,6 +794,9 @@ do
     l)
       OPEN_LOGICAL=1
       ;;
+    x)
+      PUSH_FILES_TO_REMOTE=1
+      ;;
     \?)
       print_usage
       exit 1
@@ -841,6 +829,11 @@ fi
 
 if [ "$DROP_DB" -eq 1 ]; then
    drop_standby
+   exit 0
+fi
+
+if [ "$PUSH_FILES_TO_REMOTE" -eq 1 ]; then
+   copy_to_remote
    exit 0
 fi
 

@@ -49,7 +49,10 @@ function get_password {
 function run_query {
 [ -z "$1" ] && err_exit "run_query: query text argument can not be empty."
 
-queryResult=$(sqlplus -S / as sysdba << EOF
+if [ -n "$QUERY_DEBUG" ]; then
+if [ "$QUERY_DEBUG" -eq 1 ]; then
+echo "[debug] Query text ====" 1>&2
+cat << EOF 1>&2
    whenever sqlerror exit sql.sqlcode
    whenever oserror exit
    set heading off;
@@ -58,10 +61,20 @@ queryResult=$(sqlplus -S / as sysdba << EOF
    $1
    exit;
 EOF
-)
+echo "[debug] ==============" 1>&2
+fi
+fi
+
+sqlplus -S / as sysdba << EOF 2>&1
+   whenever sqlerror exit sql.sqlcode
+   whenever oserror exit
+   set heading off;
+   set pagesize 0;
+   set feedback off;
+   $1
+   exit;
+EOF
 if [ $? -ne 0 ]; then
    err_exit "Query execution failed: $1"
 fi
-
-echo "$queryResult"
 }
