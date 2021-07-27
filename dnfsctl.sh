@@ -27,8 +27,8 @@ do
       make -f ins_rdbms.mk dnfs_off
       ;;
     c)
-      find /opt/app/oracle/product/19.3.0/dbhome_1/rdbms/lib/odm -name libnfsodm\* >/dev/null 2>&1
-      if [ $? -eq 0 ]; then
+      RESULT=$([ -d $ORACLE_HOME/rdbms/lib/odm ] && find $ORACLE_HOME/rdbms/lib/odm -name libnfsodm\*)
+      if [ -n "$RESULT" ]; then
          info_msg "dNFS is enabled."
       else
          info_msg "dNFS is off."
