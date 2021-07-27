@@ -611,19 +611,24 @@ fi
 
 echo "Converting instance ${ORACLE_SID}_stb to logical standby ..."
 
+echo "Recover to logical standby ..."
 sqlCommand="alter database recover to logical standby ${ORACLE_SID} ;"
 run_query "$sqlCommand"
 
-IGNORE_SQL_ERROR=1
-sqlCommand="shutdown immediate"
+echo "Shutdown instance ..."
+sqlCommand="shutdown abort"
 run_query "$sqlCommand"
-IGNORE_SQL_ERROR=0
 
+echo "Startup instance mounted ..."
 sqlCommand="startup mount"
 run_query "$sqlCommand"
 
-sqlCommand="alter database open resetlogs;
-alter database start logical standby apply immediate;"
+echo "Open database ..."
+sqlCommand="alter database open resetlogs;"
+run_query "$sqlCommand"
+
+echo "Start logical apply service ..."
+sqlCommand="alter database start logical standby apply immediate;"
 run_query "$sqlCommand"
 
 echo "Done."
