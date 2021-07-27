@@ -365,7 +365,7 @@ export PATH=$PATH_SAVE
 export ORACLE_SID=$ORACLE_SID_SAVE
 }
 
-while getopts "s:p:cad:r:lgwm" opt
+while getopts "s:p:cad:r:lgwmf" opt
 do
   case $opt in
     s)
