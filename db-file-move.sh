@@ -4,6 +4,7 @@ SCRIPTDIR=$(cd $(dirname $0) && pwd)
 source $SCRIPTDIR/lib/libcommon.sh
 PRINT_USAGE="Usage: $0 -s SID -d new_path"
 DRYRUN=0
+PROMPT=0
 
 function db_file_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
@@ -58,14 +59,10 @@ else
    fi
 fi
 
-echo "Moving data file $2 to $fileDestination ..."
 if [ "$3" -eq 0 ]; then
    sqlCommand="alter database move datafile '$2' to '$fileDestination' reuse;"
 else
-   sqlGetBytes="select bytes from v\$tempfile where name = '$2';"
-   tempSize=$(run_query "$sqlGetBytes")
-   [ -z "$tempSize" ] && err_exit "Can not get temp file $2 size."
-   sqlCommand="alter tablespace temp add tempfile '$fileDestination' size $tempSize autoextend on next 10M maxsize unlimited;"
+   sqlCommand="alter database tempfile '$2' offline;"
 fi
 
 if [ "$ISCDB" -eq 1 ]; then
@@ -76,19 +73,20 @@ fi
 fi
 
 if [ "$3" -eq 1 ]; then
+fileDestination=$(echo $fileDestination | sed -e 's/\.[0-9]*\.[0-9]*$/.dbf/')
 sqlCommand="$sqlCommand
-alter database tempfile '$2' offline;
-alter database tempfile '$2' drop including datafiles;"
+!$SCRIPTDIR/filecopy.sh $2 $fileDestination
+alter database rename file '$2' TO '$fileDestination';
+alter database tempfile '$fileDestination' online;"
 fi
 
 if [ "$DRYRUN" -eq 1 ]; then
    echo "$sqlCommand"
 else
-   echo "Moving data file $2 => $fileDestination ..."
+   echo -n "Moving data file $2 => $fileDestination ... "
    run_query "$sqlCommand"
    echo "Done."
 fi
-echo "Done."
 }
 
 function db_redo_move {
@@ -128,15 +126,18 @@ for ((i=0; i<${#LOG_LIST[@]}; i=i+4)); do
     GROUPFILES=$(run_query "$sqlCommand")
     j=1
     NEW_GROUP_NUM=$(($logMax + $GROUP_INCR))
+    echo -n "alter database add logfile thread $threadNum group $NEW_GROUP_NUM " >> $SQL_SCRIPT
     for GROUP_LOG_FILE in $GROUPFILES
     do
         [ -z "$GROUP_LOG_FILE" ] && err_exit "Can get redo log path for group $groupNum"
         LOG_PATH=$(dirname $GROUP_LOG_FILE)
-        echo "alter database add logfile thread $threadNum group $NEW_GROUP_NUM '$1/redo_${NEW_GROUP_NUM}_${j}.log' size ${logSize}M ;" >> $SQL_SCRIPT
+        [ "$j" -eq 1 ] && echo -n "(" >> $SQL_SCRIPT
+        [ "$j" -gt 1 ] && echo -n "," >> $SQL_SCRIPT
+        echo -n "'$1/redo_${NEW_GROUP_NUM}_${j}.log'" >> $SQL_SCRIPT
         j=$(($j + 1))
     done
+    echo ") size ${logSize}M reuse;" >> $SQL_SCRIPT
     GROUP_INCR=$(($GROUP_INCR + 1))
-
 done
 
 echo "Creating new log files ..."
@@ -243,7 +244,7 @@ alter system set log_archive_dest_1='location=$1/log' scope=spfile;"
 fi
 }
 
-while getopts "s:d:t" opt
+while getopts "s:d:tp" opt
 do
   case $opt in
     s)
@@ -254,6 +255,9 @@ do
       ;;
     t)
       DRYRUN=1
+      ;;
+    p)
+      PROMPT=1
       ;;
     \?)
       err_exit
@@ -269,18 +273,54 @@ DEST_DIR=$DEST_DIR/$ORACLE_SID
 
 get_db_path
 
+skipStep=0
+if [ "$PROMPT" -eq 1 ]; then
+   ask_prompt "About to move data files ..."
+   skipStep=$?
+fi
+
+if [ "$skipStep" -eq 0 ]; then
 allDbFiles=($(get_db_files))
 for ((i=0; i<${#allDbFiles[@]}; i=i+3)); do
    db_file_move ${allDbFiles[i]} ${allDbFiles[i+1]} ${allDbFiles[i+2]} $DEST_DIR
 done
+fi
 
+if [ "$PROMPT" -eq 1 ]; then
+   ask_prompt "About to move temp files ..."
+   skipStep=$?
+fi
+
+if [ "$skipStep" -eq 0 ]; then
 allTempFiles=($(get_temp_files))
 for ((i=0; i<${#allTempFiles[@]}; i=i+3)); do
    db_file_move ${allTempFiles[i]} ${allTempFiles[i+1]} ${allTempFiles[i+2]} $DEST_DIR
 done
+fi
 
-db_redo_move $DEST_DIR
+if [ "$PROMPT" -eq 1 ]; then
+   ask_prompt "About to move redo ..."
+   skipStep=$?
+fi
 
-db_fra_move $DEST_DIR
+if [ "$skipStep" -eq 0 ]; then
+   db_redo_move $DEST_DIR
+fi
 
-db_arch_move $DEST_DIR
+if [ "$PROMPT" -eq 1 ]; then
+   ask_prompt "About to move FRA ..."
+   skipStep=$?
+fi
+
+if [ "$skipStep" -eq 0 ]; then
+   db_fra_move $DEST_DIR
+fi
+
+if [ "$PROMPT" -eq 1 ]; then
+   ask_prompt "About to move archive logs ..."
+   skipStep=$?
+fi
+
+if [ "$skipStep" -eq 0 ]; then
+   db_arch_move $DEST_DIR
+fi

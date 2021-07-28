@@ -59,13 +59,14 @@ fi
 }
 
 function ask_prompt {
+[ -n "$1" ] && echo $1
 echo -n "Continue? (y/n): "
 read ANSWER
 
-if [ "$ANSWER" != "y" ]; then
-   echo ""
-   echo "Aborting ..."
-   exit 1
+if [ "$ANSWER" = "y" ]; then
+   return 0
+else
+   return 1
 fi
 }
 
@@ -401,6 +402,18 @@ if [ -z "$(echo $1 | sed -e '/^+/d')" ]; then
    return $?
 else
    mkdir -p $1
+   return $?
+fi
+}
+
+function db_copy {
+[ -z "$1" -o -z "$2" ] && err_exit "Syntax error: usage: db_copy src dest"
+
+if [ -z "$(echo $1 | sed -e '/^+/d')" -o -z "$(echo $2 | sed -e '/^+/d')" ]; then
+   asm_cli cp $1 $2
+   return $?
+else
+   cp -p $1 $2
    return $?
 fi
 }
