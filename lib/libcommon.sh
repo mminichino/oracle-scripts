@@ -284,6 +284,7 @@ echo "Removing database files ..."
 [[ -f $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat ]] && rm $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat
 [[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora
 [ -d $ORACLE_BASE/diag/rdbms/${ORACLE_SID} -a -n "$ORACLE_BASE" ] && rm -rf $ORACLE_BASE/diag/rdbms/${ORACLE_SID}
+[ -f /etc/oratab ] && sed -i -e "/^${ORACLE_SID}:/d" /etc/oratab
 
 if [ -f $ORACLE_HOME/network/admin/tnsnames.ora ]; then
    echo "Cleaning tnsnames.ora"
