@@ -299,234 +299,108 @@ fi
 echo "Done."
 }
 
-function db_file_move {
-[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
-[ -z "$1" -o -z "$2" -o -z "$3" -o -z "$4" ] && err_exit "Syntax error: usage: db_file_move con_id file type destination_directory"
+function asm_cli {
+[ -z "$ORACLE_SID" ] && err_exit "Oracle SID is not set"
+HOST_GRID_HOME=$(dirname $(dirname $(ps -ef |grep evmd.bin | grep -v grep | awk '{print $NF}')))
+[ -z "$HOST_GRID_HOME" ] && err_exit "Oracle CRS does not seem to be running"
+HOST_ASM_INSTANCE=$(ps -ef | grep pmon_+ASM | grep -v grep | awk '{print $NF}' | sed -e 's/^.*_pmon_//')
+[ -z "$HOST_ASM_INSTANCE" ] && err_exit "ASM does not appear to be running"
 
-if [ -z "$DEBUG" ]; then
-   DEBUG=0
-fi
+export ORACLE_HOME_SAVE=$ORACLE_HOME
+export PATH_SAVE=$PATH
+export ORACLE_SID_SAVE=$ORACLE_SID
 
-fileDestDir=$4/dbf
+export ORACLE_HOME=$HOST_GRID_HOME
+export PATH=$ORACLE_HOME/bin:$PATH
+export ORACLE_SID=$HOST_ASM_INSTANCE
 
-if [ ! -d "$fileDestDir" ]; then
-   info_msg "Destination directory $fileDestDir does not exist"
-   if [ "$DRYRUN" -eq 0 ]; then
-      echo -n "Creating destination directory ..."
-      mkdir -p $fileDestDir || err_exit "Can not create destination directory."
-      echo "Done."
-   fi
-fi
+asmcmd $@
+returnCode=$?
 
-if [ "$1" -ge 1 ]; then
-   ISCDB=1
+export ORACLE_HOME=$ORACLE_HOME_SAVE
+export PATH=$PATH_SAVE
+export ORACLE_SID=$ORACLE_SID_SAVE
+return $returnCode
+}
+
+function asm_path_check {
+[ -z "$1" ] && err_exit "Syntax error: usage: asm_path_check path"
+asm_cli ls -ls $1 >/dev/null 2>&1
+return $?
+}
+
+function asm_isdir {
+[ -z "$1" ] && err_exit "Syntax error: usage: asm_path_check path"
+result=$(asm_cli ls -ld $1 | sed -e '1d' | awk '{print NF}' 2>&1)
+if [ "$result" = "2" -o "$result" = "4" ]; then
+   return 0
 else
-   ISCDB=0
+   return 1
 fi
+}
 
-if [ "$ISCDB" -eq 1 ]; then
-   sqlCommand="select name from v\$containers where con_id = $1;"
-   pdbName=$(run_query "$sqlCommand")
-fi
-
-baseFileName=$(basename $2)
-
-if [ "$ISCDB" -eq 0 ]; then
-   fileDestination=$fileDestDir/$baseFileName
+function asm_isfile {
+[ -z "$1" ] && err_exit "Syntax error: usage: asm_path_check path"
+result=$(asm_cli ls -ld $1 | sed -e '1d' | awk '{print NF}' 2>&1)
+if [ "$result" = "8" -o "$result" = "10" ]; then
+   return 0
 else
-   if [ "$1" -gt 1 ]; then
-         filePdbName=$(echo $pdbName | sed -e 's/\$//')
-         fileDestination=$fileDestDir/$filePdbName/$baseFileName
-         if [ ! -d "$(dirname $fileDestination)" ]; then
-            info_msg "PDB Destination directory $(dirname $fileDestination) does not exist"
-            if [ "$DRYRUN" -eq 0 ]; then
-               echo -n "Creating destination directory ..."
-               mkdir -p $(dirname $fileDestination) || err_exit "Can not create PDB destination directory."
-               echo "Done."
-            fi
-         fi
+   return 1
+fi
+}
+
+function db_file_check {
+[ -z "$1" ] && err_exit "Syntax error: usage: db_file_chedk path"
+
+if [ -z "$(echo $1 | sed -e '/^+/d')" ]; then
+   asm_path_check $1
+   if [ $? -eq 0 ]; then
+      asm_isfile $1
+      return $?
    else
-      fileDestination=$fileDestDir/$baseFileName
+      return 1
    fi
-fi
-
-echo "Moving data file $2 to $fileDestination ..."
-if [ "$3" -eq 0 ]; then
-   sqlCommand="alter database move datafile '$2' to '$fileDestination' reuse;"
 else
-   sqlCommand="alter database tempfile '$2' offline;"
-fi
-
-if [ "$ISCDB" -eq 1 ]; then
-if [ "$1" -gt 1 ]; then
-sqlCommand="alter session set container=$pdbName ;
-$sqlCommand"
-fi
-fi
-
-if [ "$3" -eq 1 ]; then
-sqlCommand="$sqlCommand
-!cp -p $2 $fileDestination ;
-alter database rename file '$2' to '$fileDestination';
-alter database tempfile '$fileDestination' online;"
-fi
-
-if [ "$DRYRUN" -eq 1 ]; then
-   echo "$sqlCommand"
-else
-   echo "Moving data file $2 => $fileDestination ..."
-   run_query "$sqlCommand"
-   echo "Done."
-fi
-echo "Done."
-}
-
-function db_redo_move {
-[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
-[ -z "$1" ] && err_exit "Syntax error: usage: db_redo_move destination_directory"
-
-if [ ! -d "$1" ]; then
-   info_msg "Destination directory $1 does not exist"
-   if [ "$DRYRUN" -eq 0 ]; then
-      echo -n "Creating redo directory ..."
-      mkdir -p $1 || err_exit "Can not create destination directory."
-      echo "Done."
-   fi
-fi
-
-sqlCommand="select max(GROUP#) from v\$log ;"
-logMax=$(run_query "$sqlCommand")
-
-sqlCommand="select GROUP#, THREAD#, bytes/1024/1024, MEMBERS from v\$log;"
-LOGFILE=$(run_query "$sqlCommand")
-
-[ -z "$LOGFILE" ] && err_exit "Can not determine redo log directory"
-
-logCount=0
-LOG_LIST=($LOGFILE)
-GROUP_INCR=1
-SQL_SCRIPT=$(mktemp)
-for ((i=0; i<${#LOG_LIST[@]}; i=i+4)); do
-    groupNum=${LOG_LIST[i]}
-    threadNum=${LOG_LIST[i+1]}
-    logSize=${LOG_LIST[i+2]}
-    memberCount=${LOG_LIST[i+3]}
-    logCount=$(($logCount + 1))
-
-    sqlCommand="select member from v\$logfile where GROUP# = $groupNum ;"
-    GROUPFILES=$(run_query "$sqlCommand")
-    j=1
-    NEW_GROUP_NUM=$(($logMax + $GROUP_INCR))
-    for GROUP_LOG_FILE in $GROUPFILES
-    do
-        [ -z "$GROUP_LOG_FILE" ] && err_exit "Can get redo log path for group $groupNum"
-        LOG_PATH=$(dirname $GROUP_LOG_FILE)
-        echo "alter database add logfile thread $threadNum group $NEW_GROUP_NUM '$1/redo_${NEW_GROUP_NUM}_${j}.log' size ${logSize}M ;" >> $SQL_SCRIPT
-        j=$(($j + 1))
-    done
-    GROUP_INCR=$(($GROUP_INCR + 1))
-
-done
-
-echo "Creating new log files ..."
-if [ "$DRYRUN" -eq 1 ]; then
-   cat $SQL_SCRIPT
-else
-   sqlCommand="@$SQL_SCRIPT"
-   run_query "$sqlCommand"
-   rm $SQL_SCRIPT
-fi
-echo "Done."
-
-dropCount=0
-while true; do
-sqlCommand="alter system switch logfile;"
-result=$(run_query "$sqlCommand")
-sqlCommand="select GROUP#,STATUS from v\$log ;"
-allRedo=($(run_query "$sqlCommand"))
-for ((i=0; i<${#allRedo[@]}; i=i+2)); do
-    logGroup=${allRedo[i]}
-    logStatus=${allRedo[i+1]}
-    if [ "$logGroup" -gt "$logMax" ]; then
-       continue
-    fi
-    if [ "$logStatus" = "INACTIVE" ]; then
-       dropCount=$(($dropCount + 1))
-       sqlCommand="alter database drop logfile group $logGroup ;"
-       if [ "$DRYRUN" -eq 1 ]; then
-          echo "$sqlCommand"
-       else
-          echo "Dropping log group $logGroup"
-          run_query "$sqlCommand"
-          echo "Done."
-       fi
-    fi
-done
-[ "$dropCount" -ge "$logCount" ] && break
-done
-}
-
-function db_fra_move {
-[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
-[ -z "$1" ] && err_exit "Syntax error: usage: db_fra_move destination_directory"
-
-if [ ! -d "$1/fra" ]; then
-   info_msg "Destination directory $1/fra does not exist"
-   if [ "$DRYRUN" -eq 0 ]; then
-      echo -n "Creating FRA directory ..."
-      mkdir -p $1/fra || err_exit "Can not create destination directory."
-      echo "Done."
-   fi
-fi
-
-sqlCommand="show parameter db_recovery_file_dest"
-fraLocation=$(run_query "$sqlCommand" | grep string | awk '{print $NF}')
-
-if [ -n "$fraLocation" ]; then
-   echo "Relocating the FRA to $1/fra ..."
-   sqlCommand="alter system set db_recovery_file_dest='$1/fra' scope=both;"
-   if [ "$DRYRUN" -eq 1 ]; then
-      echo "$sqlCommand"
+   if [ -f "$1" ]; then
+      return 0
    else
-      run_query "$sqlCommand"
-      echo "Done."
+      return 1
    fi
 fi
 }
 
-function db_arch_move {
-[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
-[ -z "$1" ] && err_exit "Syntax error: usage: db_arch_move destination_directory"
+function db_dir_check {
+[ -z "$1" ] && err_exit "Syntax error: usage: db_dir_check path"
 
-sqlCommand="archive log list;"
-archInfo=$(run_query "$sqlCommand")
-archStatus=$(echo "$archInfo" | grep -i "Automatic archival" | awk '{print $NF}')
-archLocation=$(echo "$archInfo" | grep -i "Archive destination" | awk '{print $NF}')
-
-if [ -n "$archStatus" ]; then
-   if [ "$archStatus" = "Enabled" ]; then
-      if [ "$archLocation" = "USE_DB_RECOVERY_FILE_DEST" ]; then
-         echo "Archive logging to FRA enabled."
-      else
-         if [ ! -d "$1/log" ]; then
-            info_msg "Destination directory $1/log does not exist"
-            if [ "$DRYRUN" -eq 0 ]; then
-               echo -n "Creating log directory ..."
-               mkdir -p $1/log || err_exit "Can not create destination directory."
-               echo "Done."
-            fi
-         fi
-         echo "Archive logging enabled to $archLocation"
-         echo "Switching logging to $1/log ..."
-         sqlCommand="archive log start '$1/log';
-alter system set log_archive_dest_1='location=$1/log' scope=spfile;"
-         if [ "$DRYRUN" -eq 1 ]; then
-            echo "$sqlCommand"
-         else
-            run_query "$sqlCommand"
-            echo "Done."
-         fi
-      fi
+if [ -z "$(echo $1 | sed -e '/^+/d')" ]; then
+   asm_path_check $1
+   if [ $? -eq 0 ]; then
+      asm_isdir $1
+      return $?
+   else
+      return 1
    fi
+else
+   if [ -d "$1" ]; then
+      return 0
+   else
+      return 1
+   fi
+fi
+}
+
+function db_mkdir {
+[ -z "$1" ] && err_exit "Syntax error: usage: db_mkdir path"
+
+if [ -z "$(echo $1 | sed -e '/^+/d')" ]; then
+   db_dir_check $(dirname $1)
+   if [ $? -ne 0 ]; then
+      db_mkdir $(dirname $1)
+   fi
+   asm_cli mkdir $1
+   return $?
+else
+   mkdir -p $1
+   return $?
 fi
 }
