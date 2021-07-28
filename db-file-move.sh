@@ -231,12 +231,17 @@ if [ -n "$archStatus" ]; then
          fi
          echo "Archive logging enabled to $archLocation"
          echo "Switching logging to $1/log ..."
-         sqlCommand="archive log start '$1/log';
-alter system set log_archive_dest_1='location=$1/log' scope=spfile;"
+         sqlCommandA="alter system set log_archive_dest_1='location=$1/log';"
+         sqlCommandB="archive log start '$1/log';"
+         sqlCommandC="alter system archive log current;"
          if [ "$DRYRUN" -eq 1 ]; then
-            echo "$sqlCommand"
+            echo "$sqlCommandA"
+            echo "$sqlCommandB"
+            echo "$sqlCommandC"
          else
-            run_query "$sqlCommand"
+            run_query "$sqlCommandA"
+            run_query "$sqlCommandB"
+            run_query "$sqlCommandC"
             echo "Done."
          fi
       fi

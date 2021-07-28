@@ -42,7 +42,7 @@ run_query "$sqlQuery"
 
 if [ "$ARCHLOG" -eq 1 ]; then
 sqlQuery="column name format a60
-column member format a60
+column name format a70
 column status format a6
 select name,status from v\$archived_log where status <> 'D' ;"
 run_query "$sqlQuery"
