@@ -27,6 +27,8 @@ if [ -z "$DEST_DIR" -o -z "$ORACLE_SID" ]; then
    err_exit
 fi
 
+DEST_DIR=$DEST_DIR/$ORACLE_SID
+
 get_db_path
 
 allDbFiles=($(get_db_files))
@@ -42,3 +44,5 @@ done
 db_redo_move $DEST_DIR
 
 db_fra_move $DEST_DIR
+
+db_arch_move $DEST_DIR

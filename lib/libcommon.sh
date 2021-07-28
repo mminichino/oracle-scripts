@@ -307,11 +307,13 @@ if [ -z "$DEBUG" ]; then
    DEBUG=0
 fi
 
-if [ ! -d "$4" ]; then
-   info_msg "Destination directory $4 does not exist"
+fileDestDir=$4/dbf
+
+if [ ! -d "$fileDestDir" ]; then
+   info_msg "Destination directory $fileDestDir does not exist"
    if [ "$DRYRUN" -eq 0 ]; then
       echo -n "Creating destination directory ..."
-      mkdir -p $4 || err_exit "Can not create destination directory."
+      mkdir -p $fileDestDir || err_exit "Can not create destination directory."
       echo "Done."
    fi
 fi
@@ -330,21 +332,21 @@ fi
 baseFileName=$(basename $2)
 
 if [ "$ISCDB" -eq 0 ]; then
-   fileDestination=$4/$baseFileName
+   fileDestination=$fileDestDir/$baseFileName
 else
    if [ "$1" -gt 1 ]; then
          filePdbName=$(echo $pdbName | sed -e 's/\$//')
-         fileDestination=$4/$filePdbName/$baseFileName
-         if [ ! -d "$fileDestination" ]; then
-            info_msg "Destination directory $fileDestination does not exist"
+         fileDestination=$fileDestDir/$filePdbName/$baseFileName
+         if [ ! -d "$(dirname $fileDestination)" ]; then
+            info_msg "PDB Destination directory $(dirname $fileDestination) does not exist"
             if [ "$DRYRUN" -eq 0 ]; then
                echo -n "Creating destination directory ..."
-               mkdir -p $fileDestination || err_exit "Can not create destination directory."
+               mkdir -p $(dirname $fileDestination) || err_exit "Can not create PDB destination directory."
                echo "Done."
             fi
          fi
    else
-      fileDestination=$4/$baseFileName
+      fileDestination=$fileDestDir/$baseFileName
    fi
 fi
 
@@ -459,6 +461,15 @@ function db_fra_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
 [ -z "$1" ] && err_exit "Syntax error: usage: db_fra_move destination_directory"
 
+if [ ! -d "$1/fra" ]; then
+   info_msg "Destination directory $1/fra does not exist"
+   if [ "$DRYRUN" -eq 0 ]; then
+      echo -n "Creating FRA directory ..."
+      mkdir -p $1/fra || err_exit "Can not create destination directory."
+      echo "Done."
+   fi
+fi
+
 sqlCommand="show parameter db_recovery_file_dest"
 fraLocation=$(run_query "$sqlCommand" | grep string | awk '{print $NF}')
 
@@ -470,6 +481,44 @@ if [ -n "$fraLocation" ]; then
    else
       run_query "$sqlCommand"
       echo "Done."
+   fi
+fi
+}
+
+function db_arch_move {
+[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
+[ -z "$1" ] && err_exit "Syntax error: usage: db_arch_move destination_directory"
+
+if [ ! -d "$1/log" ]; then
+   info_msg "Destination directory $1/log does not exist"
+   if [ "$DRYRUN" -eq 0 ]; then
+      echo -n "Creating FRA directory ..."
+      mkdir -p $1/log || err_exit "Can not create destination directory."
+      echo "Done."
+   fi
+fi
+
+sqlCommand="archive log list;"
+archInfo=$(run_query "$sqlCommand")
+archStatus=$(echo "$archInfo" | grep -i "Automatic archival" | awk '{print $NF}')
+archLocation=$(echo "$archInfo" | grep -i "Archive destination" | awk '{print $NF}')
+
+if [ -n "$archStatus" ]; then
+   if [ "$archStatus" = "Enabled" ]; then
+      if [ "$archLocation" = "USE_DB_RECOVERY_FILE_DEST" ]; then
+         echo "Archive logging to FRA enabled."
+      else
+         echo "Archive logging enabled to $archLocation"
+         echo "Switching logging to $1/log ..."
+         sqlCommand="archive log start '$1/log';
+alter system set log_archive_dest_1='location=$1/log' scope=spfile;"
+         if [ "$DRYRUN" -eq 1 ]; then
+            echo "$sqlCommand"
+         else
+            run_query "$sqlCommand"
+            echo "Done."
+         fi
+      fi
    fi
 fi
 }
