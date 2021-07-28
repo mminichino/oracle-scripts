@@ -46,6 +46,29 @@ function get_password {
    export ORACLE_PWD=$PASSWORD
 }
 
+function warn_prompt {
+echo "WARNING: This operation is destructive and can not be undone."
+echo -n "Enter Oracle SID to contine: "
+read ANSWER
+
+if [ "$ANSWER" != "$ORACLE_SID" ]; then
+   echo ""
+   echo "Aborting ..."
+   exit 1
+fi
+}
+
+function ask_prompt {
+echo -n "Continue? (y/n): "
+read ANSWER
+
+if [ "$ANSWER" != "y" ]; then
+   echo ""
+   echo "Aborting ..."
+   exit 1
+fi
+}
+
 function run_query {
 [ -z "$1" ] && err_exit "run_query: query text argument can not be empty."
 
@@ -96,8 +119,38 @@ $displayOptions
 $1
 exit;
 EOF
-if [ $? -ne 0 -a $IGNORE_SQL_ERROR -eq 0 ]; then
+if [ $? -ne 0 -a "$IGNORE_SQL_ERROR" -eq 0 ]; then
    err_exit "Query execution failed: $1"
+fi
+}
+
+function run_rman {
+[ -z "$1" ] && err_exit "run_rman: commands text argument can not be empty."
+
+which rman 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "rman not found"
+
+if [ -z "$IGNORE_RMAN_ERROR" ]; then
+   IGNORE_RMAN_ERROR=0
+fi
+
+if [ -n "$RMAN_DEBUG" ]; then
+if [ "$RMAN_DEBUG" -eq 1 ]; then
+echo "[debug] ==== Begin RMAN Script ====" 1>&2
+cat -nvET << EOF 1>&2
+connect target /
+$1
+EOF
+echo "[debug] ==== End RMAN Script ====" 1>&2
+fi
+fi
+
+rman <<EOF
+connect target /
+$1
+EOF
+if [ $? -ne 0 -a "$IGNORE_RMAN_ERROR" -eq 0 ]; then
+   err_exit "RMAN script failed: $1"
 fi
 }
 
@@ -168,6 +221,82 @@ fi
 
 sqlCommand="select con_id, name, 1 from v\$tempfile ;"
 run_query "$sqlCommand"
+}
+
+function drop_database {
+[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
+[ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME not set."
+
+echo "ORACLE HOME   = $ORACLE_HOME"
+echo "ORACLE SID    = $ORACLE_SID"
+
+echo "This will permanently delete SID $ORACLE_SID !!!"
+echo -n "Are you sure? [Y/N]? "
+read ANSWER
+
+if [ "$ANSWER" != "Y" ]
+then
+   echo "Aborting ..."
+   exit 1
+fi
+
+which crsctl > /dev/null 2>&1
+
+if [ "$?" -eq 0 ]
+then
+   echo "CRS found ... Removing restart for instance ..."
+   CRSVERSION=$(srvctl -version | awk '{print $NF}' | sed -e 's/^\([0-9]*\)\..*$/\1/')
+   if [ "$CRSVERSION" -lt 12 ]; then
+      srvctl remove database -d $ORACLE_SID -f -y
+   else
+      srvctl remove database -db $ORACLE_SID -force -noprompt
+   fi
+   echo "Done."
+fi
+
+echo "Shutting database down... "
+
+sqlCommand="shutdown abort"
+run_query "$sqlCommand"
+
+echo "Done."
+echo "Deleting database... "
+
+IGNORE_RMAN_ERROR=1
+rmanScript="startup force mount
+sql 'alter system enable restricted session';
+drop database including backups noprompt;"
+run_rman "$rmanScript"
+
+echo "Done."
+echo "Shutting instance down... "
+
+sqlCommand="shutdown abort"
+run_query "$sqlCommand"
+
+echo "Done."
+echo "Removing database files ..."
+
+[[ -z "$ORACLE_SID" ]] && exit
+[[ -f $ORACLE_HOME/dbs/init${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/init${ORACLE_SID}.ora
+[[ -f $ORACLE_HOME/dbs/orapw${ORACLE_SID} ]] && rm $ORACLE_HOME/dbs/orapw${ORACLE_SID}
+[[ -f $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat ]] && rm $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat
+[[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora
+[ -d $ORACLE_BASE/diag/rdbms/${ORACLE_SID} -a -n "$ORACLE_BASE" ] && rm -rf $ORACLE_BASE/diag/rdbms/${ORACLE_SID}
+
+if [ -f $ORACLE_HOME/network/admin/tnsnames.ora ]; then
+   echo "Cleaning tnsnames.ora"
+   sed -i -e "/$ORACLE_SID.*=/,/^ *\$/d" $ORACLE_HOME/network/admin/tnsnames.ora
+fi
+
+LISTENER_CONFIG=$(lsnrctl status | grep "^Listener Parameter File" | awk '{print $NF}')
+
+if [ -n "$LISTENER_CONFIG" ]; then
+   echo "Cleaning listener.ora"
+   sed -i -e "/SID_LIST_LISTENER.*=/,/^ *\$/d" $LISTENER_CONFIG
+fi
+
+echo "Done."
 }
 
 function db_file_move {
@@ -252,6 +381,7 @@ echo "Done."
 
 function db_redo_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
+[ -z "$1" ] && err_exit "Syntax error: usage: db_redo_move destination_directory"
 
 sqlCommand="select max(GROUP#) from v\$log ;"
 logMax=$(run_query "$sqlCommand")
@@ -280,7 +410,7 @@ for ((i=0; i<${#LOG_LIST[@]}; i=i+4)); do
     do
         [ -z "$GROUP_LOG_FILE" ] && err_exit "Can get redo log path for group $groupNum"
         LOG_PATH=$(dirname $GROUP_LOG_FILE)
-        echo "alter database add logfile thread $threadNum group $NEW_GROUP_NUM '$LOG_PATH/stb_redo_${NEW_GROUP_NUM}_${j}.log' size ${logSize}M ;" >> $SQL_SCRIPT
+        echo "alter database add logfile thread $threadNum group $NEW_GROUP_NUM '$1/redo_${NEW_GROUP_NUM}_${j}.log' size ${logSize}M ;" >> $SQL_SCRIPT
         j=$(($j + 1))
     done
     GROUP_INCR=$(($GROUP_INCR + 1))
@@ -297,7 +427,6 @@ else
 fi
 echo "Done."
 
-echo "max = $logMax count = $logCount"
 dropCount=0
 while true; do
 sqlCommand="alter system switch logfile;"
@@ -322,7 +451,25 @@ for ((i=0; i<${#allRedo[@]}; i=i+2)); do
        fi
     fi
 done
-echo "drop = $dropCount"
 [ "$dropCount" -ge "$logCount" ] && break
 done
+}
+
+function db_fra_move {
+[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
+[ -z "$1" ] && err_exit "Syntax error: usage: db_fra_move destination_directory"
+
+sqlCommand="show parameter db_recovery_file_dest"
+fraLocation=$(run_query "$sqlCommand" | grep string | awk '{print $NF}')
+
+if [ -n "$fraLocation" ]; then
+   echo "Relocating the FRA to $1/fra ..."
+   sqlCommand="alter system set db_recovery_file_dest='$1/fra' scope=both;"
+   if [ "$DRYRUN" -eq 1 ]; then
+      echo "$sqlCommand"
+   else
+      run_query "$sqlCommand"
+      echo "Done."
+   fi
+fi
 }

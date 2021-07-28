@@ -1,30 +1,16 @@
 #!/bin/bash
 #
 #
+SCRIPTDIR=$(cd $(dirname $0) && pwd)
+source $SCRIPTDIR/lib/libcommon.sh
+PRINT_USAGE="Usage: $0 -s SID [ -l ]
+             -s Oracle SID
+             -l Just remove SID from tnsnames.ora
+             -m Manual remove without dbca"
 unset SID_ARG
 SCRIPTDIR=$(cd $(dirname $0) && pwd)
 LISTENER_ONLY=0
-
-function print_usage {
-   echo "Usage: $0 -s SID [ -l ]"
-   echo "          -s Oracle SID"
-   echo "          -l Just remove SID from tnsnames.ora"
-}
-
-function err_exit {
-   if [ -n "$1" ]; then
-      echo "[!] Error: $1"
-   else
-      print_usage
-   fi
-   exit 1
-}
-
-function warn_msg {
-   if [ -n "$1" ]; then
-      echo "[i] Warning: $1"
-   fi
-}
+MANUAL_REMOVE=0
 
 function listener_remove {
 [ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME not set."
@@ -53,71 +39,7 @@ fi
 
 }
 
-function get_db_path {
-
-ISCDB=`sqlplus -S / as sysdba << EOF
-   whenever sqlerror exit sql.sqlcode
-   whenever oserror exit
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select name from v\\$containers where con_id = 0;
-   exit;
-EOF
-`
-
-[ $? -ne 0 ] && err_exit "Error getting CDB status"
-
-if [ -z "$ISCDB" ]; then
-   cdbConId=1
-else
-   cdbConId=0
-fi
-
-sysDataFile=`sqlplus -S / as sysdba << EOF
-   whenever sqlerror exit sql.sqlcode
-   whenever oserror exit
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select name from v\\$datafile where ts# = 0 and con_id = $cdbConId ;
-   exit;
-EOF
-`
-
-[ $? -ne 0 ] && err_exit "Error connecing to SID $ORACLE_SID"
-
-dataFilePath=$(dirname $sysDataFile)
-
-archLogLocation=`sqlplus -S / as sysdba << EOF
-   whenever sqlerror exit sql.sqlcode
-   whenever oserror exit
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select destination from v\\$archive_dest where dest_name='LOG_ARCHIVE_DEST_1';
-   exit;
-EOF
-`
-
-[ $? -ne 0 ] && err_exit "Error connecing to SID $ORACLE_SID"
-
-recoveryLocation=`sqlplus -S / as sysdba << EOF
-   whenever sqlerror exit sql.sqlcode
-   whenever oserror exit
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   select name from v\\$recovery_file_dest where con_id = 0;
-   exit;
-EOF
-`
-
-[ $? -ne 0 ] && err_exit "Error connecing to SID $ORACLE_SID"
-
-}
-
-while getopts "s:l" opt
+while getopts "s:lm" opt
 do
   case $opt in
     s)
@@ -125,6 +47,9 @@ do
       ;;
     l)
       LISTENER_ONLY=1
+      ;;
+    m)
+      MANUAL_REMOVE=1
       ;;
     \?)
       print_usage
@@ -136,8 +61,15 @@ done
 [ -z "$SID_ARG" ] && [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not defined"
 export ORACLE_SID=$SID_ARG
 
+warn_prompt
+
 if [ "$LISTENER_ONLY" -eq 1 ]; then
    listener_remove
+   exit 0
+fi
+
+if [ "$MANUAL_REMOVE" -eq 1 ]; then
+   drop_database
    exit 0
 fi
 
@@ -147,32 +79,11 @@ echo "Deleting Oracle SID $ORACLE_SID"
 echo "  Deleting data directory   : $dataFilePath"
 echo "  Deleting recovery directoy: $recoveryLocation"
 echo "  Deleting log directory    : $archLogLocation"
-echo "WARNING: This operation is destructive and can not be undone."
-echo -n "Enter Oracle SID to contine: "
-read ANSWER
+ask_prompt
 
-if [ "$ANSWER" != "$ORACLE_SID" ]; then
-   echo ""
-   echo "Aborting ..."
-   exit 1
-fi
+get_password
 
-while true
-do
-   echo -n "Password: "
-   read -s PASSWORD
-   echo ""
-   echo -n "Retype Password: "
-   read -s CHECK_PASSWORD
-   echo ""
-   if [ "$PASSWORD" != "$CHECK_PASSWORD" ]; then
-      echo "Passwords do not match"
-   else
-      break
-   fi
-done
-
-dbca -silent -deleteDatabase -sourceDB $ORACLE_SID -sysDBAUserName sys -sysDBAPassword "$PASSWORD" || err_exit "Database $ORACLE_SID delete failed"
+dbca -silent -deleteDatabase -sourceDB $ORACLE_SID -sysDBAUserName sys -sysDBAPassword "$ORACLE_PWD" || err_exit "Database $ORACLE_SID delete failed"
 
 listener_config $ORACLE_SID
 

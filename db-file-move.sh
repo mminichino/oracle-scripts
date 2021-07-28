@@ -39,4 +39,6 @@ for ((i=0; i<${#allTempFiles[@]}; i=i+3)); do
    db_file_move ${allTempFiles[i]} ${allTempFiles[i+1]} ${allTempFiles[i+2]} $DEST_DIR
 done
 
-db_redo_move
+db_redo_move $DEST_DIR
+
+db_fra_move $DEST_DIR
