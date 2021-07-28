@@ -385,6 +385,15 @@ function db_redo_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
 [ -z "$1" ] && err_exit "Syntax error: usage: db_redo_move destination_directory"
 
+if [ ! -d "$1" ]; then
+   info_msg "Destination directory $1 does not exist"
+   if [ "$DRYRUN" -eq 0 ]; then
+      echo -n "Creating redo directory ..."
+      mkdir -p $1 || err_exit "Can not create destination directory."
+      echo "Done."
+   fi
+fi
+
 sqlCommand="select max(GROUP#) from v\$log ;"
 logMax=$(run_query "$sqlCommand")
 
@@ -489,15 +498,6 @@ function db_arch_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
 [ -z "$1" ] && err_exit "Syntax error: usage: db_arch_move destination_directory"
 
-if [ ! -d "$1/log" ]; then
-   info_msg "Destination directory $1/log does not exist"
-   if [ "$DRYRUN" -eq 0 ]; then
-      echo -n "Creating FRA directory ..."
-      mkdir -p $1/log || err_exit "Can not create destination directory."
-      echo "Done."
-   fi
-fi
-
 sqlCommand="archive log list;"
 archInfo=$(run_query "$sqlCommand")
 archStatus=$(echo "$archInfo" | grep -i "Automatic archival" | awk '{print $NF}')
@@ -508,6 +508,14 @@ if [ -n "$archStatus" ]; then
       if [ "$archLocation" = "USE_DB_RECOVERY_FILE_DEST" ]; then
          echo "Archive logging to FRA enabled."
       else
+         if [ ! -d "$1/log" ]; then
+            info_msg "Destination directory $1/log does not exist"
+            if [ "$DRYRUN" -eq 0 ]; then
+               echo -n "Creating log directory ..."
+               mkdir -p $1/log || err_exit "Can not create destination directory."
+               echo "Done."
+            fi
+         fi
          echo "Archive logging enabled to $archLocation"
          echo "Switching logging to $1/log ..."
          sqlCommand="archive log start '$1/log';
