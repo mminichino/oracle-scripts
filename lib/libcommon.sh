@@ -85,10 +85,11 @@ if [ -z "$SHOW_HEADERS" ]; then
 fi
 
 if [ "$SHOW_HEADERS" -eq 1 ]; then
-displayOptions="set linesize 200;
+displayOptions="set linesize 400;
 set pagesize 100;"
 else
 displayOptions="set heading off;
+set linesize 32767;
 set pagesize 0;
 set feedback off;"
 fi
@@ -284,7 +285,10 @@ echo "Removing database files ..."
 [[ -f $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat ]] && rm $ORACLE_HOME/dbs/hc_${ORACLE_SID}.dat
 [[ -f $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora ]] && rm $ORACLE_HOME/dbs/spfile${ORACLE_SID}.ora
 [ -d $ORACLE_BASE/diag/rdbms/${ORACLE_SID} -a -n "$ORACLE_BASE" ] && rm -rf $ORACLE_BASE/diag/rdbms/${ORACLE_SID}
-[ -f /etc/oratab ] && sed -i -e "/^${ORACLE_SID}:/d" /etc/oratab
+if [ -f /etc/oratab ]; then
+   cat /etc/oratab | sed -e "/^${ORACLE_SID}:/d" > /tmp/oratab.$$
+   mv /tmp/oratab.$$ /etc/oratab
+fi
 
 if [ -f $ORACLE_HOME/network/admin/tnsnames.ora ]; then
    echo "Cleaning tnsnames.ora"
