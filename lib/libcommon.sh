@@ -301,7 +301,8 @@ echo "Removing database files ..."
 [ -d $ORACLE_BASE/diag/rdbms/${ORACLE_SID} -a -n "$ORACLE_BASE" ] && rm -rf $ORACLE_BASE/diag/rdbms/${ORACLE_SID}
 if [ -f /etc/oratab ]; then
    cat /etc/oratab | sed -e "/^${ORACLE_SID}:/d" > /tmp/oratab.$$
-   mv /tmp/oratab.$$ /etc/oratab
+   cp /tmp/oratab.$$ /etc/oratab || err_exit "Can not modify /etc/oratab"
+   rm /tmp/oratab.$$
 fi
 
 if [ -f $ORACLE_HOME/network/admin/tnsnames.ora ]; then
