@@ -79,3 +79,23 @@ Recreate the standby database:
 ````
 $ ./db-dg-prep.sh -p oracle_sid -h primary_host_name -r
 ````
+
+To online relocate a database supply a target root directory. Subdirectories will be created for data files, the FRA, and archive logs. This supports FS to FS, ASM to FS, and FS to ASM.
+````
+$ ./db-file-move.sh -s oracle_sid -d /path
+````
+
+To test a move without actually moving anything:
+````
+$ ./db-file-move.sh -s oracle_sid -d /path -t
+````
+
+To prompt whether or not to perform each step:
+````
+$ ./db-file-move.sh -s oracle_sid -d /path -p
+````
+
+To perform a move of one file type where the destination directory is a full path (no subdirectories are created - this will automatically enable prompting):
+````
+./db-file-move.sh -s oracle_sid -d /path -f
+````
