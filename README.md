@@ -90,12 +90,12 @@ To test a move without actually moving anything:
 $ ./db-file-move.sh -s oracle_sid -d /path -t
 ````
 
-To prompt whether or not to perform each step:
+Use the prompt option to ask to move each data file type. If you respond "no" then it will skip that data file type.
 ````
 $ ./db-file-move.sh -s oracle_sid -d /path -p
 ````
 
-To perform a move of one file type where the destination directory is a full path (no subdirectories are created - this will automatically enable prompting):
+To perform a move of one file type where the destination directory is a full path (no subdirectories are created - this will automatically enable prompting, and it will exit after finishing a file type relocation):
 ````
 ./db-file-move.sh -s oracle_sid -d /path -f
 ````

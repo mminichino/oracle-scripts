@@ -191,15 +191,13 @@ done
 function db_fra_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
 [ -z "$1" ] && err_exit "Syntax error: usage: db_fra_move destination_directory"
+[ -z "$fraLocation" ] && warn_msg "FRA location not set"
 
 if [ "$DEST_ROOT" -eq 1 ]; then
    fileDestDir=$1/fra
 else
    fileDestDir=$1
 fi
-
-sqlCommand="show parameter db_recovery_file_dest"
-fraLocation=$(run_query "$sqlCommand" | grep string | awk '{print $NF}')
 
 if [ -n "$fraLocation" ]; then
    echo "Relocating the FRA to $fileDestDir ..."
@@ -225,6 +223,7 @@ fi
 function db_arch_move {
 [ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
 [ -z "$1" ] && err_exit "Syntax error: usage: db_arch_move destination_directory"
+[ -z "$archStatus" ] && warn_msg "Can not determine archive log status"
 
 if [ "$DEST_ROOT" -eq 1 ]; then
    fileDestDir=$1/log
@@ -232,14 +231,9 @@ else
    fileDestDir=$1
 fi
 
-sqlCommand="archive log list;"
-archInfo=$(run_query "$sqlCommand")
-archStatus=$(echo "$archInfo" | grep -i "Automatic archival" | awk '{print $NF}')
-archLocation=$(echo "$archInfo" | grep -i "Archive destination" | awk '{print $NF}')
-
 if [ -n "$archStatus" ]; then
    if [ "$archStatus" = "Enabled" ]; then
-      if [ "$archLocation" = "USE_DB_RECOVERY_FILE_DEST" ]; then
+      if [ "$archLogLocation" = "USE_DB_RECOVERY_FILE_DEST" ]; then
          echo "Archive logging to FRA enabled."
       else
          db_dir_check $fileDestDir
@@ -251,7 +245,7 @@ if [ -n "$archStatus" ]; then
                echo "Done."
             fi
          fi
-         echo "Archive logging enabled to $archLocation"
+         echo "Archive logging enabled to $archLogLocation"
          echo "Switching logging to $fileDestDir ..."
          sqlCommandA="alter system set log_archive_dest_1='location=$fileDestDir';"
          sqlCommandB="archive log start '$fileDestDir';"
@@ -268,6 +262,46 @@ if [ -n "$archStatus" ]; then
          fi
       fi
    fi
+fi
+}
+
+function db_control_move {
+[ -z "$ORACLE_SID" ] && err_exit "Oracle SID not set"
+[ -z "$1" ] && err_exit "Syntax error: usage: db_control_move destination_directory"
+fileDestDir=$1
+
+echo "Warning: control file move is disruptive."
+ask_prompt
+
+if [ "$DEST_ROOT" -eq 1 ]; then
+   recoDestDir=$fileDestDir/fra
+else
+   recoDestDir=$fileDestDir
+fi
+
+restoreControlFile=$(echo $controlFiles | awk '{print $1}')
+newControlFileA=$fileDestDir/control01.ctl
+newControlFileB=$recoDestDir/control02.ctl
+
+echo "Backing up spfile ..."
+sqlCommand="create pfile='?/dbs/init@.ora-backup' from spfile;"
+if [ "$DRYRUN" -eq 1 ]; then
+   echo "$sqlCommand"
+else
+   run_query "$sqlCommand"
+fi
+
+rmanCommand="alter system set control_files='$newControlFileA','$newControlFileB' scope=spfile;
+shutdown immediate;
+startup nomount;
+restore controlfile from '$restoreControlFile';
+alter database mount;
+alter database open;"
+
+if [ "$DRYRUN" -eq 1 ]; then
+   echo "$rmanCommand"
+else
+   run_rman "$rmanCommand"
 fi
 }
 
@@ -362,4 +396,15 @@ fi
 
 if [ "$skipStep" -eq 0 ]; then
    db_arch_move $DEST_DIR
+fi
+
+[ "$PROMPT" -eq 1 -a "$DEST_ROOT" -eq 0 ] && exit 0
+
+if [ "$PROMPT" -eq 1 ]; then
+   ask_prompt "About to move control files ..."
+   skipStep=$?
+fi
+
+if [ "$skipStep" -eq 0 ]; then
+   db_control_move $DEST_DIR
 fi

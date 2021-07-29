@@ -172,13 +172,18 @@ else
    cdbConId=0
 fi
 
+sqlCommand="select value from v\$parameter where name = 'db_unique_name' ;"
+dbUniqueName=$(run_query "$sqlCommand")
+
 sqlCommand="select name from v\$datafile where ts# = 0 and con_id = $cdbConId ;"
 sysDataFile=$(run_query "$sqlCommand")
 
 dataFilePath=$(dirname $sysDataFile)
 
-sqlCommand="select destination from v\$archive_dest where dest_name='LOG_ARCHIVE_DEST_1';"
-archLogLocation=$(run_query "$sqlCommand")
+sqlCommand="archive log list;"
+archInfo=$(run_query "$sqlCommand")
+archStatus=$(echo "$archInfo" | grep -i "Automatic archival" | awk '{print $NF}')
+archLogLocation=$(echo "$archInfo" | grep -i "Archive destination" | awk '{print $NF}')
 
 sqlCommand="select name from v\$recovery_file_dest where con_id = 0;"
 recoveryLocation=$(run_query "$sqlCommand")
@@ -186,12 +191,21 @@ recoveryLocation=$(run_query "$sqlCommand")
 sqlCommand="select value from v\$parameter where name = 'audit_file_dest' ;"
 auditFileDest=$(run_query "$sqlCommand")
 
+sqlCommand="select value from v\$parameter where name = 'db_recovery_file_dest' ;"
+fraLocation=$(run_query "$sqlCommand")
+
+sqlCommand="select name from v\$controlfile ;"
+controlFiles=$(run_query "$sqlCommand")
+
 if [ "$DEBUG" -eq 1 ]; then
    echo "CON_ID:              $cdbConId"
    echo "Data File Location:  $dataFilePath"
+   echo "Arch Log Status:     $archStatus"
    echo "Arch Log Location:   $archLogLocation"
    echo "Recovery Location:   $recoveryLocation"
    echo "Audit File Location: $auditFileDest"
+   echo "FRA Location:        $fraLocation"
+   echo "Control Files:       $(echo $controlFiles | sed -e 's/ /,/')"
 fi
 }
 
