@@ -1,47 +1,66 @@
 #!/bin/sh
 #
-
-function print_usage {
-   echo "Usage: $0"
-}
-
-function err_exit {
-   if [ -n "$1" ]; then
-      echo "[!] Error: $1"
-   else
-      print_usage
-   fi
-   exit 1
-}
-
-function info_msg {
-   if [ -n "$1" ]; then
-      echo "[i] Notice: $1"
-   fi
-}
+SCRIPTDIR=$(cd $(dirname $0) && pwd)
+source $SCRIPTDIR/lib/libcommon.sh
+PRINT_USAGE="Usage: $0 [ -r ]"
+STOP_RUNNING=0
+STOP_ASM=0
+FORCE=0
 
 function stop_db {
-which sqlplus 2>&1 >/dev/null
-[ $? -ne 0 ] && err_exit "sqlplus not found"
-
 [ -z "$1" ] && err_exit "stop-db: SID parameter required."
-
 export ORACLE_SID=$1
 
 echo "Stopping database $1 ..."
-sqlplus -S / as sysdba << EOF
-   set heading off;
-   set pagesize 0;
-   set feedback off;
-   shutdown immediate
-   exit;
-EOF
-if [ $? -ne 0 ]; then
-   err_exit "Failed to shutdown database"
+if [ "$FORCE" -eq 0 ]; then
+   sqlCommand="shutdown immediate"
 else
-   echo "Done."
+   sqlCommand="shutdown abort"
 fi
+run_query "$sqlCommand"
+echo "Done."
 }
+
+while getopts "raf" opt
+do
+  case $opt in
+    r)
+      STOP_RUNNING=1
+      ;;
+    a)
+      STOP_ASM=1
+      ;;
+    f)
+      FORCE=1
+      ;;
+    \?)
+      err_exit
+      ;;
+  esac
+done
+
+if [ "$STOP_RUNNING" -eq 1 ]; then
+for oraSID in $(ps -ef |grep _pmon |grep -v grep | awk '{print $NF}' | sed -e 's/^.*pmon_//')
+do
+   if [ -n "$(echo $oraSID | sed -e 's/^+.*$//')" ]; then
+      stop_db $oraSID
+   fi
+done
+exit 0
+fi
+
+if [ "$STOP_ASM" -eq 1 ]; then
+which srvctl 2>&1 >/dev/null
+[ $? -ne 0 ] && err_exit "srvctl not found"
+
+for oraSID in $(ps -ef |grep _pmon |grep -v grep | awk '{print $NF}' | sed -e 's/^.*pmon_//')
+do
+   if [ -z "$(echo $oraSID | sed -e 's/^+.*$//')" ]; then
+      srvctl stop asm -force
+   fi
+done
+exit 0
+fi
 
 for line in $(sed -e 's/#.*$//' -e '/^$/d' /etc/oratab)
 do
