@@ -34,9 +34,8 @@ class sqlplus:
         self.out_queue = queue.Queue()
         self.err_queue = queue.Queue()
 
-        if os.getenv('ORACLE_SID'):
-            self.sid = os.getenv('ORACLE_SID')
-            print(self.sid)
+        if os.getenv('ORACLE_SID') is None:
+            raise GeneralError(self, "ORACLE_SID environment variable must be set")
 
     def unblock(self, fd):
         flags = fcntl.fcntl(fd, fcntl.F_GETFL)
