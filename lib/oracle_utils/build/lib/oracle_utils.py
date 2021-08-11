@@ -4,7 +4,10 @@ import json
 import os
 import fcntl
 import subprocess
-import queue
+try:
+    from Queue import Queue, Empty
+except ImportError:
+    from queue import Queue, Empty
 import threading
 
 class OracleError(Exception):
@@ -13,7 +16,10 @@ class OracleError(Exception):
         self.sp = sp
         self.message = message
         self.sp.end()
-        super().__init__(self.message)
+        try:
+            super().__init__(self.message)
+        except TypeError:
+            super(Exception, self).__init__(self.message)
 
 class GeneralError(Exception):
 
@@ -22,25 +28,29 @@ class GeneralError(Exception):
         self.message = message
         if self.sp.p:
             self.sp.end()
-        super().__init__(self.message)
+        try:
+            super().__init__(self.message)
+        except TypeError:
+            super(Exception, self).__init__(self.message)
 
 class sqlplus:
 
-    def __init__(self):
+    def __init__(self, query=None):
         self.p = None
         self.sid = None
         self.out_thread = None
         self.err_thread = None
-        self.out_queue = queue.Queue()
-        self.err_queue = queue.Queue()
+        self.out_queue = Queue()
+        self.err_queue = Queue()
 
         if os.getenv('ORACLE_SID') is None:
             raise GeneralError(self, "ORACLE_SID environment variable must be set")
 
-    def unblock(self, fd):
-        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-        flags = flags | os.O_NONBLOCK
-        fcntl.fcntl(fd, fcntl.F_SETFL, flags)
+        if query:
+            self.start()
+            result = self.run_query(query)
+            self.end()
+            print(json.dumps(result, indent=4))
 
     def stdout_reader(self):
         for line in iter(self.p.stdout.readline, b''):
@@ -112,7 +122,7 @@ class sqlplus:
 
                 if gather and linenum == 1:
                     for x in range(len(linearray)):
-                        heading.append(linearray[x].strip())
+                        heading.append(linearray[x].strip().lower())
 
                 if gather and linenum > 1:
                     rowdata = {}
@@ -120,14 +130,14 @@ class sqlplus:
                         rowdata.update({heading[x]: linearray[x].strip()})
                     results['results'].append(rowdata)
 
-            except queue.Empty:
+            except Empty:
                 pass
 
             try:
                 line = self.err_queue.get(block=False)
                 linestr = '{0}'.format(line).strip()
                 raise GeneralError(self, linestr)
-            except queue.Empty:
+            except Empty:
                 pass
 
         return results
@@ -136,7 +146,7 @@ class sqlplus:
         self.p.stdin.write('{}\n'.format("exit").encode('utf-8'))
         self.p.stdin.close()
         self.p.terminate()
-        self.p.wait(timeout=0.2)
+        self.p.wait()
         self.out_thread.join()
         self.err_thread.join()
 
