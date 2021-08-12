@@ -28,6 +28,21 @@ function info_msg {
    fi
 }
 
+function log_output {
+    [ -z "$NOLOG" ] && NOLOG=0
+    DATE=$(date '+%m-%d-%y_%H:%M:%S')
+    HOSTNAME=$(uname -n)
+    [ -z "$LOGFILE" ] && LOGFILE=/tmp/$(basename $0).log
+    while read line; do
+        [ -z "$line" ] && continue
+        if [ "$NOLOG" -eq 0 -a -n "$LOGFILE" ]; then
+           echo "$DATE $HOSTNAME: $line" >> $LOGFILE
+        else
+           echo "$DATE $HOSTNAME: $line"
+        fi
+    done
+}
+
 function get_password {
    while true
    do

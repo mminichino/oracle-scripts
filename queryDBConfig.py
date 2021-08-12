@@ -8,7 +8,7 @@ import getopt
 import oracle_utils
 
 def print_usage():
-    print("Usage: " + sys.argv[0] + " --file /config/dir/db.json")
+    print("Usage: " + sys.argv[0] + " --file /config/dir/config/db.json query")
     sys.exit(1)
 
 def main():
@@ -41,8 +41,6 @@ def main():
     except OSError as e:
         print("Could not read configuration file: %s" % e)
         sys.exit(1)
-
-#    print(json.dumps(dbconfig, indent=4))
 
     for query in remainder:
         if query == "dbname":

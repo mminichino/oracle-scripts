@@ -55,9 +55,9 @@ def main():
     if not cfgdir or not orasid:
         print_usage()
 
-    if not os.path.isdir(cfgdir):
+    if not os.path.isdir(cfgdir + '/config'):
         try:
-            mkdir_p(cfgdir)
+            mkdir_p(cfgdir + '/config')
         except OSError as e:
             print("Error: %s" % e)
             sys.exit(1)
@@ -96,7 +96,7 @@ def main():
         for x in range(len(archive['results'])):
             dbconfig['archive'].append(archive['results'][x])
 
-    dbconfig_file = cfgdir + '/' + dbconfig['database']['db_unique_name'] + '.json'
+    dbconfig_file = cfgdir + '/config/' + dbconfig['database']['db_unique_name'] + '.json'
 
     try:
         with open(dbconfig_file, 'w') as configSaveFile:

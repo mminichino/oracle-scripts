@@ -8,7 +8,7 @@ import getopt
 import oracle_utils
 
 def print_usage():
-    print("Usage: " + sys.argv[0] + " --sid ORACLE_SID")
+    print("Usage: " + sys.argv[0] + " -s ORACLE_SID -t backup_tag -d /backup/dir -a | -b")
     sys.exit(1)
 
 def mkdir_p(path):
@@ -75,7 +75,7 @@ def main():
         arch_script.append("SQL 'ALTER SYSTEM ARCHIVE LOG CURRENT';")
 
         for x in range(len(arch_currnt['results'])):
-            arch_script.append("BACKUP AS COPY ARCHIVELOG SEQUENCE " + arch_currnt['results'][x]['sequence#'] + " THREAD " + arch_currnt['results'][x]['thread#'])
+            arch_script.append("BACKUP AS COPY ARCHIVELOG SEQUENCE " + arch_currnt['results'][x]['sequence#'] + " THREAD " + arch_currnt['results'][x]['thread#'] + ";")
 
         arch_script.append("CHANGE COPY OF ARCHIVELOG LIKE '" + bkupdir + "/archivelog/%' UNCATALOG ;")
         arch_script.append("}")
@@ -107,7 +107,7 @@ def main():
         bkup_script.append("CROSSCHECK BACKUP TAG '" + bkuptag + "';")
         bkup_script.append("CATALOG start with '" + bkupdir + "/" + dbname + "' NOPROMPT ;")
         bkup_script.append("CATALOG start with '" + bkupdir + "/archivelog' NOPROMPT ;")
-        bkup_script.append("BACKUP CHANNEL CH01 INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '" + bkuptag + "' DATABASE")
+        bkup_script.append("BACKUP CHANNEL CH01 INCREMENTAL LEVEL 1 FOR RECOVER OF COPY WITH TAG '" + bkuptag + "' DATABASE ;")
         bkup_script.append("RECOVER COPY OF DATABASE WITH TAG '" + bkuptag + "';")
         bkup_script.append("BACKUP AS COPY CURRENT CONTROLFILE TAG '" + bkuptag + "' FORMAT '" + bkupdir + "/" + dbname + "/control01.ctl' REUSE ;")
         bkup_script.append("DELETE NOPROMPT BACKUPSET TAG '" + bkuptag + "';")
