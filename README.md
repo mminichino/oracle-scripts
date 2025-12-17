@@ -14,7 +14,10 @@ To end hot backup mode:
 ./db-hot-backup.sh -e -s proddb
 ```
 
-To create an incremental merge copy (and don't catalog the backup):
+To create an incremental merge copy:
+```shell
+. ./setup.sh
+```
 ```shell
 ./db-incr-merge.sh -s proddb -d /oradb/backup
 ```
