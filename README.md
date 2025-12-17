@@ -24,7 +24,10 @@ To create an incremental merge copy:
 
 To upload an incremental merge copy to S3:
 ```shell
-./db-s3-backup.sh -s proddb -d /oradb/cloud -e https://s3.company.com -p authprofile -b bucket
+. ./setup.sh
+```
+```shell
+./db-s3-backup.sh -s proddb -d /oradb/backup -b bucket
 ```
 
 To create a new database with archivelog mode enabled:
