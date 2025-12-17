@@ -1,13 +1,7 @@
-# Oracle Python Utilities Library
-#
 import json
 import os
-import fcntl
 import subprocess
-try:
-    from Queue import Queue, Empty
-except ImportError:
-    from queue import Queue, Empty
+from queue import Queue, Empty
 import threading
 
 class OracleError(Exception):
@@ -33,7 +27,7 @@ class GeneralError(Exception):
         except TypeError:
             super(Exception, self).__init__(self.message)
 
-class sqlplus:
+class Sqlplus:
 
     def __init__(self, query=None):
         self.p = None
@@ -60,7 +54,8 @@ class sqlplus:
         for line in iter(self.p.stderr.readline, b''):
             self.err_queue.put(line.decode('utf-8'))
 
-    def check_repeat(self, text, char):
+    @staticmethod
+    def check_repeat(text, char):
         for x in range(len(text)):
             if text[x] != text[0] or text[x] != char:
                 return False
@@ -149,5 +144,3 @@ class sqlplus:
         self.p.wait()
         self.out_thread.join()
         self.err_thread.join()
-
-

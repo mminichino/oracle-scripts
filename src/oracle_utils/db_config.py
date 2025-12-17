@@ -1,5 +1,3 @@
-#!/usr/bin/python
-#
 import os
 import sys
 import errno
@@ -23,7 +21,7 @@ def mkdir_p(path):
 def main():
 
     options = []
-    remainder = []
+    containers = {}
     cfgdir = None
     orasid = None
     quietmode = False
@@ -38,12 +36,12 @@ def main():
 
     try:
         options, remainder = getopt.getopt(sys.argv[1:], "hqd:s:", ["dir=", "sid=", "quiet"])
-    except getopt.GetoptError as e:
-        print("Invalid arguments: %s" % str(e))
+    except getopt.GetoptError as err:
+        print("Invalid arguments: %s" % str(err))
         print_usage()
 
     for opt, arg in options:
-        if opt in ('-h'):
+        if opt in '-h':
             print_usage()
         elif opt in ('-d', '--dir'):
             cfgdir = arg
@@ -58,13 +56,13 @@ def main():
     if not os.path.isdir(cfgdir + '/config'):
         try:
             mkdir_p(cfgdir + '/config')
-        except OSError as e:
-            print("Error: %s" % e)
+        except OSError as err:
+            print("Error: %s" % err)
             sys.exit(1)
 
     os.environ['ORACLE_SID'] = orasid
 
-    sql_session = oracle_utils.sqlplus()
+    sql_session = oracle_utils.Sqlplus()
     sql_session.start()
     instance = sql_session.run_query('select * from v$instance;')
     database = sql_session.run_query('select * from v$database;')
@@ -103,8 +101,8 @@ def main():
             json.dump(dbconfig, configSaveFile, indent=4)
             configSaveFile.write("\n")
             configSaveFile.close()
-    except OSError as e:
-        print("Could not write config file: %s" % e)
+    except OSError as err:
+        print("Could not write config file: %s" % err)
         sys.exit(1)
 
     if quietmode:

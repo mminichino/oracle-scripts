@@ -1,9 +1,6 @@
-#!/usr/bin/python
-#
 import os
 import sys
 import errno
-import json
 import getopt
 import oracle_utils
 
@@ -22,6 +19,7 @@ def mkdir_p(path):
 
 def main():
 
+    options = []
     orasid = None
     bkuptag = None
     bkupdir = None
@@ -30,12 +28,12 @@ def main():
 
     try:
         options, remainder = getopt.getopt(sys.argv[1:], "habs:t:d:", ["archive", "backup", "sid=", "tag=", "dir="])
-    except getopt.GetoptError as e:
-        print("Invalid arguments: %s" % str(e))
+    except getopt.GetoptError as err:
+        print("Invalid arguments: %s" % str(err))
         print_usage()
 
     for opt, arg in options:
-        if opt in ('-h'):
+        if opt in '-h':
             print_usage()
         elif opt in ('-s', '--sid'):
             orasid = arg
@@ -59,12 +57,12 @@ def main():
         if not os.path.isdir(bkupdir + "/archivelog"):
             try:
                 mkdir_p(bkupdir + "/archivelog")
-            except OSError as e:
-                print("Error: %s" % e)
+            except OSError as err:
+                print("Error: %s" % err)
                 sys.exit(1)
 
         arch_script = []
-        sql_session = oracle_utils.sqlplus()
+        sql_session = oracle_utils.Sqlplus()
         sql_session.start()
         arch_currnt = sql_session.run_query("select thread#, sequence# from v$log where status = 'CURRENT' or status = 'CLEARING_CURRENT' union select thread#, max(sequence#) from v$log where status = 'INACTIVE' group by thread# order by thread#, sequence# ;")
         sql_session.end()
@@ -85,7 +83,7 @@ def main():
 
     if bkup_mode:
         bkup_script = []
-        sql_session = oracle_utils.sqlplus()
+        sql_session = oracle_utils.Sqlplus()
         sql_session.start()
         dbinfo = sql_session.run_query("select * from v$database;")
         sql_session.end()
@@ -95,8 +93,8 @@ def main():
         if not os.path.isdir(bkupdir + "/" + dbname):
             try:
                 mkdir_p(bkupdir + "/" + dbname)
-            except OSError as e:
-                print("Error: %s" % e)
+            except OSError as err:
+                print("Error: %s" % err)
                 sys.exit(1)
 
         bkup_script.append("run")

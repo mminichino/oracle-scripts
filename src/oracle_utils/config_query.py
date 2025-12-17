@@ -1,11 +1,7 @@
-#!/usr/bin/python
-#
 import os
 import sys
-import errno
 import json
 import getopt
-import oracle_utils
 
 def print_usage():
     print("Usage: " + sys.argv[0] + " --file /config/dir/config/db.json query")
@@ -14,16 +10,18 @@ def print_usage():
 def main():
 
     cfgfile = None
+    options = []
+    remainder = []
     dbconfig = {}
 
     try:
         options, remainder = getopt.getopt(sys.argv[1:], "hf:", ["file=", ])
-    except getopt.GetoptError as e:
-        print("Invalid arguments: %s" % str(e))
+    except getopt.GetoptError as err:
+        print("Invalid arguments: %s" % str(err))
         print_usage()
 
     for opt, arg in options:
-        if opt in ('-h'):
+        if opt in '-h':
             print_usage()
         elif opt in ('-f', '--file'):
             cfgfile = arg
@@ -35,11 +33,11 @@ def main():
         with open(cfgfile, 'r') as configReadFile:
             try:
                 dbconfig = json.load(configReadFile)
-            except ValueError as e:
-                print("Configuration file does not contain valid JSON data: %s" % e)
+            except ValueError as err:
+                print("Configuration file does not contain valid JSON data: %s" % err)
                 sys.exit(1)
-    except OSError as e:
-        print("Could not read configuration file: %s" % e)
+    except OSError as err:
+        print("Could not read configuration file: %s" % err)
         sys.exit(1)
 
     for query in remainder:

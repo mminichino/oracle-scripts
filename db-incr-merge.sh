@@ -50,18 +50,18 @@ export ORACLE_SID=${SID_ARG}
 echo "Begin incremental merge backup." 2>&1 | log_output
 
 echo "Creating database configuration file." 2>&1 | log_output
-DBCONFIG=$($SCRIPTLOC/createDBConfig.py -q -d $BACKUP_DIR -s $ORACLE_SID)
+DBCONFIG=$(db_config -q -d $BACKUP_DIR -s $ORACLE_SID)
 [ $? -ne 0 ] && err_exit "Can not create DB config file."
 
 echo "Checking database archive log status." 2>&1 | log_output
-$SCRIPTLOC/queryDBConfig.py -f $DBCONFIG archivemode
+config_query -f $DBCONFIG archivemode
 [ $? -ne 0 ] && err_exit "Database is not in archive log mode."
 
-dbversion=$($SCRIPTLOC/queryDBConfig.py -f $DBCONFIG dbversion)
+dbversion=$(config_query -f $DBCONFIG dbversion)
 [ $? -ne 0 ] && err_exit "Can not get database version"
 
 dbBackupScript=$(mktemp)
-$SCRIPTLOC/createRMANScript.py -s $ORACLE_SID -t $BACKUP_TAG -d $BACKUP_DIR -b > $dbBackupScript
+rman_script -s $ORACLE_SID -t $BACKUP_TAG -d $BACKUP_DIR -b > $dbBackupScript
 [ $? -ne 0 -o ! -s "$dbBackupScript" ] && err_exit "Can not create backup script"
 
 echo "Beginning incremental backup $BACKUP_TAG on database $ORACLE_SID" 2>&1 | log_output
@@ -79,7 +79,7 @@ else
 fi
 
 archBackupScript=$(mktemp)
-$SCRIPTLOC/createRMANScript.py -s $ORACLE_SID -t $BACKUP_TAG -d $BACKUP_DIR -a > $archBackupScript
+rman_script -s $ORACLE_SID -t $BACKUP_TAG -d $BACKUP_DIR -a > $archBackupScript
 [ $? -ne 0 -o ! -s "$archBackupScript" ] && err_exit "Can not create archive log script."
 
 echo "Beginning archive log backup $BACKUP_TAG on database $ORACLE_SID" 2>&1 | log_output
