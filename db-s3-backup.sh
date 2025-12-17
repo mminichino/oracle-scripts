@@ -100,7 +100,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Running incremental merge backup to $BACKUP_DIR"
-$SCRIPTLOC/db-incr-merge.sh -s "$DBNAME" -d "$BACKUP_DIR" -t "$BACKUP_TAG"
+$SCRIPTLOC/db-incr-merge.sh -s "$ORACLE_SID" -d "$BACKUP_DIR" -t "$BACKUP_TAG"
 
 echo "Copying backup to S3 bucket $BACKUP_BUCKET"
 
