@@ -21,11 +21,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
+dependencies = []
 
 [project.urls]
 "Homepage" = "https://github.com/mminichino/oracle-scripts/tree/master/src"
-
-dependencies = []
 
 [project.scripts]
 db_config = "oracle_utils.db_config:main"
