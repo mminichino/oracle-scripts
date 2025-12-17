@@ -9,10 +9,10 @@ Example
 -------
 
 ```python
-import oracle_utils
+from oracle_utils import Sqlplus
 import json
 
-sql_session = oracle_utils.Sqlplus()
+sql_session = Sqlplus()
 sql_session.start()
 result = sql_session.run_query('select * from dual;')
 print(json.dumps(result, indent=4))
@@ -22,11 +22,11 @@ sql_session.end()
 You can pass a query to the module if you want to only execute one query and output the results to the terminal:
 
 ```python
-oracle_utils.Sqlplus(query="select * from v$instance;")
+Sqlplus(query="select * from v$instance;")
 ```
 
 This also enables a Bash one-linter to run a quick query:
 
 ````
-$ python -c "import oracle_utils; oracle_utils.sqlplus(query='select * from v\$instance;')"
+$ python -c "from oracle_utils import Sqlplus; Sqlplus(query='select * from v\$instance;')"
 ````

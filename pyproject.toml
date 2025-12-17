@@ -1,8 +1,27 @@
 [project]
 name = "oracle_utils"
-version = "1.1.0"
-description = "Oracle Utils"
+dynamic = ["version"]
+description = "Oracle SQLPlus Automation for Database Scripting"
+readme = "src/README.md"
+license = "MIT"
+license-files = ["src/LICENSE"]
 requires-python = ">=3.8"
+authors = [
+    { name = "Michael Minichino", email = "info@unix.us.com" },
+]
+keywords = ["oracle", "database", "sqlplus", "backup", "automation"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+
 dependencies = []
 
 [project.scripts]
