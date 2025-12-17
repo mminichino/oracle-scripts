@@ -27,6 +27,6 @@ Sqlplus(query="select * from v$instance;")
 
 This also enables a Bash one-linter to run a quick query:
 
-````
-$ python -c "from oracle_utils import Sqlplus; Sqlplus(query='select * from v\$instance;')"
-````
+```shell
+python -c "from oracle_utils import Sqlplus; Sqlplus(query='select * from v\$instance;')"
+```

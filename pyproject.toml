@@ -22,6 +22,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
+[project.urls]
+"Homepage" = "https://github.com/mminichino/oracle-scripts/tree/master/src"
+
 dependencies = []
 
 [project.scripts]
