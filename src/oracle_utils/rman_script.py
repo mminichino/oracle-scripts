@@ -2,7 +2,7 @@ import os
 import sys
 import errno
 import getopt
-import oracle_utils
+from .oracle_utils import Sqlplus
 
 def print_usage():
     print("Usage: " + sys.argv[0] + " -s ORACLE_SID -t backup_tag -d /backup/dir -a | -b")
@@ -62,7 +62,7 @@ def main():
                 sys.exit(1)
 
         arch_script = []
-        sql_session = oracle_utils.Sqlplus()
+        sql_session = Sqlplus()
         sql_session.start()
         arch_currnt = sql_session.run_query("select thread#, sequence# from v$log where status = 'CURRENT' or status = 'CLEARING_CURRENT' union select thread#, max(sequence#) from v$log where status = 'INACTIVE' group by thread# order by thread#, sequence# ;")
         sql_session.end()
@@ -83,7 +83,7 @@ def main():
 
     if bkup_mode:
         bkup_script = []
-        sql_session = oracle_utils.Sqlplus()
+        sql_session = Sqlplus()
         sql_session.start()
         dbinfo = sql_session.run_query("select * from v$database;")
         sql_session.end()

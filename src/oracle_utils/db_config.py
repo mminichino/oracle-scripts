@@ -3,7 +3,7 @@ import sys
 import errno
 import json
 import getopt
-import oracle_utils
+from .oracle_utils import Sqlplus
 
 def print_usage():
     print("Usage: " + sys.argv[0] + " --dir /config/dir --sid ORACLE_SID")
@@ -62,7 +62,7 @@ def main():
 
     os.environ['ORACLE_SID'] = orasid
 
-    sql_session = oracle_utils.Sqlplus()
+    sql_session = Sqlplus()
     sql_session.start()
     instance = sql_session.run_query('select * from v$instance;')
     database = sql_session.run_query('select * from v$database;')
