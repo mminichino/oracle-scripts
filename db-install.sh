@@ -112,15 +112,27 @@ fi
 
 ORA_INVENTORY="$ORACLE_BASE/oraInventory"
 
-# INS-32035: central inventory location must be empty
-if [ -d "$ORA_INVENTORY" ] && [ -n "$(ls -A "$ORA_INVENTORY" 2>/dev/null)" ]; then
+# INS-32035: inventory must be empty and writable. A prior failed install often
+# leaves root-owned files that the oracle user cannot remove or even list.
+prepare_inventory() {
    if [ -f /etc/oraInst.loc ]; then
-      err_exit "Inventory $ORA_INVENTORY is not empty and /etc/oraInst.loc exists. Clear it manually if this is a re-install."
+      err_exit "Inventory already registered via /etc/oraInst.loc; clear it manually for a re-install"
    fi
-   info_msg "Removing stale (unregistered) inventory at $ORA_INVENTORY"
-   rm -rf "$ORA_INVENTORY"
-fi
-mkdir -p "$ORA_INVENTORY" || err_exit "Cannot create $ORA_INVENTORY"
+   if [ -e "$ORA_INVENTORY" ]; then
+      info_msg "Removing unregistered inventory at $ORA_INVENTORY"
+      sudo rm -rf "$ORA_INVENTORY" || err_exit "Failed to remove $ORA_INVENTORY (try: sudo rm -rf $ORA_INVENTORY)"
+   fi
+   # Stale OUI session dirs can also trigger INS-32035
+   sudo rm -rf /tmp/OraInstall* /tmp/CVU* 2>/dev/null || true
+
+   mkdir -p "$ORA_INVENTORY" || err_exit "Cannot create $ORA_INVENTORY"
+   if [ -n "$(ls -A "$ORA_INVENTORY" 2>/dev/null)" ]; then
+      err_exit "Inventory $ORA_INVENTORY is not empty after cleanup"
+   fi
+   [ -w "$ORA_INVENTORY" ] || err_exit "Inventory $ORA_INVENTORY is not writable by $(id -un)"
+}
+
+prepare_inventory
 
 echo "Oracle Base    : $ORACLE_BASE"
 echo "Oracle Home    : $ORACLE_HOME"
