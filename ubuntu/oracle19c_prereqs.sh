@@ -5,6 +5,8 @@
 # (steps 1-7: prereq checks, packages, user/groups, kernel params,
 # directories, hostname check, oracle user environment).
 #
+# Safe to re-run (idempotent).
+#
 # NOTE: Oracle 19c is not certified on Ubuntu. Use for dev/test only.
 #
 # Usage:
@@ -29,6 +31,19 @@ log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Ensure $1 is a symlink to $2 (create or replace). No-op if already correct.
+ensure_symlink() {
+  local link=$1 target=$2
+  if [[ -L "$link" ]]; then
+    [[ "$(readlink -f "$link")" == "$(readlink -f "$target")" ]] && return 0
+    ln -sfn "$target" "$link"
+  elif [[ -e "$link" ]]; then
+    die "Refusing to replace existing path with symlink: $link"
+  else
+    ln -s "$target" "$link"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Step 1: Prerequisite checks
 # ---------------------------------------------------------------------------
@@ -47,12 +62,19 @@ mem_gb=$(awk '/MemTotal/ {printf "%.1f", $2/1024/1024}' /proc/meminfo)
 swap_gb=$(awk '/SwapTotal/ {printf "%.1f", $2/1024/1024}' /proc/meminfo)
 mkdir -p /u01
 free_gb=$(df -BG --output=avail /u01 | tail -1 | tr -dc '0-9')
+free_gb=${free_gb:-0}
 
 echo "RAM: ${mem_gb} GB | Swap: ${swap_gb} GB | Free disk on /u01: ${free_gb} GB"
 
-awk -v m="$mem_gb" 'BEGIN{exit !(m < 2)}' && warn "Less than 2 GB RAM (8 GB recommended)."
-awk -v s="$swap_gb" 'BEGIN{exit !(s < 2)}' && warn "Less than 2 GB swap."
-[[ "$free_gb" -lt 12 ]] && warn "Less than 12 GB free disk space on /u01."
+if awk -v m="$mem_gb" 'BEGIN{exit !(m < 2)}'; then
+  warn "Less than 2 GB RAM (8 GB recommended)."
+fi
+if awk -v s="$swap_gb" 'BEGIN{exit !(s < 2)}'; then
+  warn "Less than 2 GB swap."
+fi
+if [[ "$free_gb" -lt 12 ]]; then
+  warn "Less than 12 GB free disk space on /u01."
+fi
 
 echo
 echo "Reminder: download LINUX.X64_193000_db_home.zip from oracle.com manually"
@@ -70,17 +92,45 @@ apt-get install -y \
   ksh make gcc g++ libc6-dev libelf-dev unixodbc-dev unzip net-tools \
   libmotif-common libxtst6 libxi6 libxrender1 libxcb1 libxext6 xauth
 
-log "Creating compatibility symlinks (libaio.so.1, libnsl.so.1)"
+log "Creating compatibility symlinks (lib64, libaio.so.1, libnsl.so.1)"
 LIBDIR=/usr/lib/x86_64-linux-gnu
 
+# Oracle makefiles hardcode /usr/lib64 (RHEL layout). On Ubuntu the
+# multiarch libs live under /usr/lib/x86_64-linux-gnu, so point lib64 there.
+# Fixes: cannot find /usr/lib64/libc_nonshared.a (and crti.o, etc.)
+if [[ -L /usr/lib64 || ! -e /usr/lib64 ]]; then
+  ensure_symlink /usr/lib64 "$LIBDIR"
+elif [[ -d /usr/lib64 ]]; then
+  warn "/usr/lib64 exists as a real directory; linking individual objects instead."
+  for f in libc_nonshared.a libpthread_nonshared.a crt1.o crti.o crtn.o; do
+    if [[ -e "$LIBDIR/$f" ]]; then
+      if [[ -L "/usr/lib64/$f" || ! -e "/usr/lib64/$f" ]]; then
+        ensure_symlink "/usr/lib64/$f" "$LIBDIR/$f"
+      fi
+    fi
+  done
+else
+  die "/usr/lib64 exists and is neither a directory nor a symlink"
+fi
+
+# glibc >= 2.34 may not ship libpthread_nonshared.a; Oracle still links it.
+# Replace a broken symlink; leave an existing real file alone.
+if [[ -L /usr/lib64/libpthread_nonshared.a && ! -e /usr/lib64/libpthread_nonshared.a ]]; then
+  rm -f /usr/lib64/libpthread_nonshared.a
+fi
+if [[ ! -e /usr/lib64/libpthread_nonshared.a ]]; then
+  ar cr /usr/lib64/libpthread_nonshared.a
+  echo "Created empty /usr/lib64/libpthread_nonshared.a"
+fi
+
 if [[ -e "$LIBDIR/libaio.so.1t64" ]]; then
-  ln -sf "$LIBDIR/libaio.so.1t64" "$LIBDIR/libaio.so.1"
+  ensure_symlink "$LIBDIR/libaio.so.1" "$LIBDIR/libaio.so.1t64"
 else
   warn "$LIBDIR/libaio.so.1t64 not found; libaio.so.1 symlink not created."
 fi
 
 if [[ -e "$LIBDIR/libnsl.so.2" ]]; then
-  ln -sf "$LIBDIR/libnsl.so.2" "$LIBDIR/libnsl.so.1"
+  ensure_symlink "$LIBDIR/libnsl.so.1" "$LIBDIR/libnsl.so.2"
 else
   warn "$LIBDIR/libnsl.so.2 not found; libnsl.so.1 symlink not created."
 fi
@@ -106,6 +156,7 @@ cat > /etc/sudoers.d/80-oracle-user <<'EOF'
 # User rules for oracle
 oracle ALL=(ALL) NOPASSWD:ALL
 EOF
+chmod 440 /etc/sudoers.d/80-oracle-user
 
 if [[ -n "${ORACLE_PASSWORD:-}" ]]; then
   echo "oracle:${ORACLE_PASSWORD}" | chpasswd
@@ -180,8 +231,9 @@ BASHRC=/home/oracle/.bashrc
 MARK_START="# >>> oracle 19c environment >>>"
 MARK_END="# <<< oracle 19c environment <<<"
 
-# Remove any previous block so the script is safe to re-run
-if grep -qF "$MARK_START" "$BASHRC" 2>/dev/null; then
+# Ensure bashrc exists, then replace any previous managed block
+touch "$BASHRC"
+if grep -qF "$MARK_START" "$BASHRC"; then
   sed -i "/$MARK_START/,/$MARK_END/d" "$BASHRC"
 fi
 
