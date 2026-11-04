@@ -146,14 +146,29 @@ echo ""
 info_msg "Starting silent software install"
 "$RUNINSTALLER" -silent -force -waitforcompletion \
    -responsefile "$INSTALL_DIR/$INSTALL_RSP" \
-   $IGNORE_OPTS \
-   || err_exit "runInstaller failed"
+   $IGNORE_OPTS
+rc=$?
+# OUI: 0 = success, 6 = success with warnings (root scripts pending / ignored prereqs).
+# Some 19.3 builds still print "Successfully Setup Software" with other non-zero codes.
+if [ "$rc" -eq 0 ] || [ "$rc" -eq 6 ]; then
+   info_msg "runInstaller completed (exit $rc)"
+elif [ -x "$ORA_INVENTORY/orainstRoot.sh" ] && [ -x "$ORACLE_HOME/root.sh" ]; then
+   warn_msg "runInstaller exited $rc but root scripts exist; treating as success"
+else
+   err_exit "runInstaller failed (exit $rc)"
+fi
 
 info_msg "Running orainstRoot.sh"
-sudo "$ORACLE_BASE/oraInventory/orainstRoot.sh" || err_exit "orainstRoot.sh failed"
+[ -x "$ORA_INVENTORY/orainstRoot.sh" ] \
+   || err_exit "orainstRoot.sh not found: $ORA_INVENTORY/orainstRoot.sh"
+sudo "$ORA_INVENTORY/orainstRoot.sh" || err_exit "orainstRoot.sh failed"
 
 info_msg "Running root.sh"
-sudo "$ORACLE_HOME/root.sh" || err_exit "root.sh failed"
+[ -x "$ORACLE_HOME/root.sh" ] \
+   || err_exit "root.sh not found: $ORACLE_HOME/root.sh"
+# Feed defaults for local bin dir (and any yes/no prompts) so root.sh is non-interactive
+printf '/usr/local/bin\n' | sudo "$ORACLE_HOME/root.sh" \
+   || err_exit "root.sh failed"
 
 rm -f "$INSTALL_DIR/$INSTALL_RSP"
 info_msg "Oracle software install complete"
