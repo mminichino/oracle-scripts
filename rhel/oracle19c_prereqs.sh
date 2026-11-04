@@ -158,6 +158,30 @@ else
   echo "ORACLE_PASSWORD not set; skipping password. Run 'passwd oracle' if you need one."
 fi
 
+# Copy SSH authorized_keys from the user who invoked sudo (idempotent sync).
+src_user="${SUDO_USER:-}"
+if [[ -z "$src_user" || "$src_user" == "root" ]]; then
+  echo "No SUDO_USER (or ran as root); skipping authorized_keys copy."
+elif [[ "$src_user" == "oracle" ]]; then
+  echo "SUDO_USER is oracle; skipping authorized_keys copy."
+else
+  src_home=$(getent passwd "$src_user" | cut -d: -f6)
+  src_keys="${src_home}/.ssh/authorized_keys"
+  dst_ssh=/home/oracle/.ssh
+  dst_keys="$dst_ssh/authorized_keys"
+  if [[ -z "$src_home" || ! -f "$src_keys" ]]; then
+    echo "No authorized_keys for $src_user; skipping."
+  else
+    install -d -m 700 -o oracle -g oinstall "$dst_ssh"
+    if [[ -f "$dst_keys" ]] && cmp -s "$src_keys" "$dst_keys"; then
+      echo "oracle authorized_keys already matches $src_user."
+    else
+      install -m 600 -o oracle -g oinstall "$src_keys" "$dst_keys"
+      echo "Copied authorized_keys from $src_user to oracle."
+    fi
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Step 4: Kernel parameters and limits
 # ---------------------------------------------------------------------------
