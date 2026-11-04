@@ -8,13 +8,12 @@ PRINT_USAGE="Usage: $0 [-b oracle_base] [-o oracle_home] [-v version] [-r rsp_te
              -b Oracle Base        (or ORACLE_BASE env)
              -o Oracle Home        (or ORACLE_HOME env)
              -v Version for rsp    112|121|122|183|193 (default: 193)
-             -r Response template  (overrides -v; default: \$SCRIPTDIR/db_inst_\$version.rsp)
-
-runInstaller must be in PATH or at \$ORACLE_HOME/runInstaller."
+             -r Response template  (overrides -v; default: \$SCRIPTDIR/db_inst_\$version.rsp)"
 
 unset RSP_TEMPLATE
 VERSION=193
-INSTALL_RSP=/tmp/db_inst.rsp
+INSTALL_DIR=/tmp
+INSTALL_RSP=db_inst.rsp
 
 function select_rsp_template {
    case "$VERSION" in
@@ -39,14 +38,15 @@ function select_rsp_template {
    esac
 }
 
-function find_runinstaller {
-   if which runInstaller >/dev/null 2>&1; then
-      which runInstaller
-   elif [ -x "$ORACLE_HOME/runInstaller" ]; then
-      echo "$ORACLE_HOME/runInstaller"
-   else
-      err_exit "runInstaller not found in PATH or \$ORACLE_HOME"
-   fi
+function version_major {
+   case "$VERSION" in
+      112|11.2|11)  echo 11 ;;
+      121|12.1)     echo 12 ;;
+      122|12.2)     echo 12 ;;
+      183|18)       echo 18 ;;
+      193|19)       echo 19 ;;
+      *)            err_exit "Unsupported version '$VERSION'" ;;
+   esac
 }
 
 while getopts "b:o:v:r:" opt
@@ -79,40 +79,49 @@ export ORACLE_BASE ORACLE_HOME
 [ -z "$RSP_TEMPLATE" ] && RSP_TEMPLATE=$(select_rsp_template)
 [ ! -f "$RSP_TEMPLATE" ] && err_exit "Response file template not found: $RSP_TEMPLATE"
 
-RUNINSTALLER=$(find_runinstaller)
+MAJOR=$(version_major)
+if [ "$MAJOR" -ge 18 ]; then
+   RUNINSTALLER="$ORACLE_HOME/runInstaller"
+   IGNORE_OPTS="-ignorePrereqFailure"
+else
+   RUNINSTALLER="$ORACLE_HOME/database/runInstaller"
+   IGNORE_OPTS="-ignoresysprereqs -ignoreprereq"
+fi
+[ ! -x "$RUNINSTALLER" ] && err_exit "runInstaller not found or not executable: $RUNINSTALLER"
 
-if [ -f "$INSTALL_RSP" ]; then
-   info_msg "$INSTALL_RSP exists"
+if [ -f "$INSTALL_DIR/$INSTALL_RSP" ]; then
+   info_msg "$INSTALL_DIR/$INSTALL_RSP exists"
    echo -n "Remove? (y/n): "
    read ANSWER
    if [ "$ANSWER" = "y" ]; then
-      rm -f "$INSTALL_RSP"
+      rm -f "$INSTALL_DIR/$INSTALL_RSP"
    else
       echo "Aborting ..."
       exit 1
    fi
 fi
 
-cp "$RSP_TEMPLATE" "$INSTALL_RSP" || err_exit "Failed to copy response template"
-sed -i -e "s|###ORACLE_BASE###|$ORACLE_BASE|g" "$INSTALL_RSP"
-sed -i -e "s|###ORACLE_HOME###|$ORACLE_HOME|g" "$INSTALL_RSP"
+cp "$RSP_TEMPLATE" "$INSTALL_DIR/$INSTALL_RSP" || err_exit "Failed to copy response template"
+sed -i -e "s|###ORACLE_BASE###|$ORACLE_BASE|g" "$INSTALL_DIR/$INSTALL_RSP"
+sed -i -e "s|###ORACLE_HOME###|$ORACLE_HOME|g" "$INSTALL_DIR/$INSTALL_RSP"
 
-UNRESOLVED=$(grep -oE '###[A-Z0-9_]+###' "$INSTALL_RSP" | sort -u | tr '\n' ' ')
+UNRESOLVED=$(grep -oE '###[A-Z0-9_]+###' "$INSTALL_DIR/$INSTALL_RSP" | sort -u | tr '\n' ' ')
 if [ -n "$UNRESOLVED" ]; then
-   err_exit "Unresolved placeholders in $INSTALL_RSP: $UNRESOLVED"
+   err_exit "Unresolved placeholders in $INSTALL_DIR/$INSTALL_RSP: $UNRESOLVED"
 fi
 
 echo "Oracle Base    : $ORACLE_BASE"
 echo "Oracle Home    : $ORACLE_HOME"
+echo "DB Version     : $VERSION (major $MAJOR)"
 echo "runInstaller   : $RUNINSTALLER"
 echo "Rsp Template   : $RSP_TEMPLATE"
-echo "Install Rsp    : $INSTALL_RSP"
+echo "Install Rsp    : $INSTALL_DIR/$INSTALL_RSP"
 echo ""
 
 info_msg "Starting silent software install"
 "$RUNINSTALLER" -silent -force -waitforcompletion \
-   -responsefile "$INSTALL_RSP" \
-   -ignoresysprereqs -ignoreprereq \
+   -responsefile "$INSTALL_DIR/$INSTALL_RSP" \
+   $IGNORE_OPTS \
    || err_exit "runInstaller failed"
 
 info_msg "Running orainstRoot.sh"
@@ -121,6 +130,6 @@ sudo "$ORACLE_BASE/oraInventory/orainstRoot.sh" || err_exit "orainstRoot.sh fail
 info_msg "Running root.sh"
 sudo "$ORACLE_HOME/root.sh" || err_exit "root.sh failed"
 
-rm -f "$INSTALL_RSP"
+rm -f "$INSTALL_DIR/$INSTALL_RSP"
 info_msg "Oracle software install complete"
 exit 0
