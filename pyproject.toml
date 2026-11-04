@@ -23,7 +23,7 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-"Homepage" = "https://github.com/mminichino/oracle-scripts/tree/master/src"
+"Homepage" = "https://github.com/mminichino/oracle-scripts/tree/main/src"
 
 [project.scripts]
 db_config = "oracle_utils.db_config:main"
