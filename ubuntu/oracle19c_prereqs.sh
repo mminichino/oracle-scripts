@@ -25,7 +25,8 @@ ORACLE_SID="${ORACLE_SID:-ORCL}"
 ORACLE_BASE="${ORACLE_BASE:-/u01/app/oracle}"
 ORACLE_HOME="${ORACLE_HOME:-$ORACLE_BASE/product/19.0.0/dbhome_1}"
 ORACLE_DATA_DIR="${ORACLE_DATA_DIR:-/u01/oradata}"
-ORA_INVENTORY="/u01/app/oraInventory"
+# Must match db_inst*.rsp: INVENTORY_LOCATION=###ORACLE_BASE###/oraInventory
+ORA_INVENTORY="${ORACLE_BASE}/oraInventory"
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
@@ -199,7 +200,21 @@ EOF
 # ---------------------------------------------------------------------------
 log "Step 5: Creating directories"
 
-mkdir -p "$ORACLE_HOME" "$ORA_INVENTORY" "$ORACLE_DATA_DIR"
+mkdir -p "$ORACLE_HOME" "$ORACLE_DATA_DIR"
+
+# Central inventory must be empty for runInstaller (INS-32035). Create it
+# fresh when missing; if a previous failed install left contents and the
+# inventory was never registered (/etc/oraInst.loc absent), clear it.
+if [[ -d "$ORA_INVENTORY" ]] && [[ -n "$(ls -A "$ORA_INVENTORY" 2>/dev/null || true)" ]]; then
+  if [[ -f /etc/oraInst.loc ]]; then
+    warn "Inventory $ORA_INVENTORY is not empty and /etc/oraInst.loc exists; leaving it alone."
+  else
+    warn "Removing stale (unregistered) inventory at $ORA_INVENTORY"
+    rm -rf "$ORA_INVENTORY"
+  fi
+fi
+mkdir -p "$ORA_INVENTORY"
+
 chown -R oracle:oinstall /u01
 chmod -R 775 /u01
 

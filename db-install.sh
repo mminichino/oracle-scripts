@@ -110,8 +110,21 @@ if [ -n "$UNRESOLVED" ]; then
    err_exit "Unresolved placeholders in $INSTALL_DIR/$INSTALL_RSP: $UNRESOLVED"
 fi
 
+ORA_INVENTORY="$ORACLE_BASE/oraInventory"
+
+# INS-32035: central inventory location must be empty
+if [ -d "$ORA_INVENTORY" ] && [ -n "$(ls -A "$ORA_INVENTORY" 2>/dev/null)" ]; then
+   if [ -f /etc/oraInst.loc ]; then
+      err_exit "Inventory $ORA_INVENTORY is not empty and /etc/oraInst.loc exists. Clear it manually if this is a re-install."
+   fi
+   info_msg "Removing stale (unregistered) inventory at $ORA_INVENTORY"
+   rm -rf "$ORA_INVENTORY"
+fi
+mkdir -p "$ORA_INVENTORY" || err_exit "Cannot create $ORA_INVENTORY"
+
 echo "Oracle Base    : $ORACLE_BASE"
 echo "Oracle Home    : $ORACLE_HOME"
+echo "Inventory      : $ORA_INVENTORY"
 echo "DB Version     : $VERSION (major $MAJOR)"
 echo "runInstaller   : $RUNINSTALLER"
 echo "Rsp Template   : $RSP_TEMPLATE"
