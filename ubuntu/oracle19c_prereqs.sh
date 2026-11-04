@@ -102,6 +102,11 @@ else
   useradd -m -u 54321 -g oinstall -G dba,oper -s /bin/bash oracle
 fi
 
+cat > /etc/sudoers.d/80-oracle-user <<'EOF'
+# User rules for oracle
+oracle ALL=(ALL) NOPASSWD:ALL
+EOF
+
 if [[ -n "${ORACLE_PASSWORD:-}" ]]; then
   echo "oracle:${ORACLE_PASSWORD}" | chpasswd
   echo "Password set for user 'oracle'."
