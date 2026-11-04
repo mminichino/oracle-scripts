@@ -12,10 +12,11 @@
 #   sudo ORACLE_PASSWORD='S0mePassw0rd' ./oracle19c_prereqs.sh
 #
 # Optional overrides (environment variables):
-#   ORACLE_SID        (default: ORCL)
-#   ORACLE_BASE       (default: /u01/app/oracle)
-#   ORACLE_HOME       (default: $ORACLE_BASE/product/19.0.0/dbhome_1)
-#   ORACLE_DATA_DIR   (default: /u01/oradata)
+#   ORACLE_SID          (default: ORCL)
+#   ORACLE_BASE         (default: /u01/app/oracle)
+#   ORACLE_HOME         (default: $ORACLE_BASE/product/19.0.0/dbhome_1)
+#   ORACLE_DATA_DIR     (default: /u01/oradata)
+#   CV_ASSUME_DISTID    (default: OEL7.8) — required for 19.3 OUI on RHEL 8
 #   PREINSTALL_RPM_URL  Override URL for oracle-database-preinstall-19c
 
 set -euo pipefail
@@ -24,6 +25,8 @@ ORACLE_SID="${ORACLE_SID:-ORCL}"
 ORACLE_BASE="${ORACLE_BASE:-/u01/app/oracle}"
 ORACLE_HOME="${ORACLE_HOME:-$ORACLE_BASE/product/19.0.0/dbhome_1}"
 ORACLE_DATA_DIR="${ORACLE_DATA_DIR:-/u01/oradata}"
+# 19.3 runInstaller on RHEL 8 hits INS-08101 without this (supportedOSCheck NPE).
+CV_ASSUME_DISTID="${CV_ASSUME_DISTID:-OEL7.8}"
 # Must match db_inst*.rsp: INVENTORY_LOCATION=###ORACLE_BASE###/oraInventory
 ORA_INVENTORY="${ORACLE_BASE}/oraInventory"
 
@@ -281,10 +284,21 @@ export ORACLE_HOME=$ORACLE_HOME
 export ORACLE_SID=$ORACLE_SID
 export PATH=\$ORACLE_HOME/bin:\$PATH
 export LD_LIBRARY_PATH=\$ORACLE_HOME/lib:/lib:/usr/lib
+export CV_ASSUME_DISTID=$CV_ASSUME_DISTID
 export LANG=en_US.UTF-8
 $MARK_END
 EOF
 chown oracle:oinstall "$BASHRC"
+
+# Login shells / su - oracle (idempotent rewrite)
+cat > /etc/profile.d/oracle-cv-assume-distid.sh <<EOF
+# Set by oracle19c_prereqs.sh — avoids INS-08101 supportedOSCheck on RHEL 8 + 19.3
+if [ "\$(id -un 2>/dev/null)" = "oracle" ]; then
+  export CV_ASSUME_DISTID=\${CV_ASSUME_DISTID:-$CV_ASSUME_DISTID}
+fi
+EOF
+chmod 644 /etc/profile.d/oracle-cv-assume-distid.sh
+echo "CV_ASSUME_DISTID=$CV_ASSUME_DISTID (oracle user)"
 
 # ---------------------------------------------------------------------------
 log "Done. Next steps (as the oracle user):"
