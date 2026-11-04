@@ -97,8 +97,9 @@ cp "$RSP_TEMPLATE" "$INSTALL_RSP" || err_exit "Failed to copy response template"
 sed -i -e "s|###ORACLE_BASE###|$ORACLE_BASE|g" "$INSTALL_RSP"
 sed -i -e "s|###ORACLE_HOME###|$ORACLE_HOME|g" "$INSTALL_RSP"
 
-if grep -q '###' "$INSTALL_RSP"; then
-   err_exit "Unresolved placeholders remain in $INSTALL_RSP"
+UNRESOLVED=$(grep -oE '###[A-Z0-9_]+###' "$INSTALL_RSP" | sort -u | tr '\n' ' ')
+if [ -n "$UNRESOLVED" ]; then
+   err_exit "Unresolved placeholders in $INSTALL_RSP: $UNRESOLVED"
 fi
 
 echo "Oracle Base    : $ORACLE_BASE"
