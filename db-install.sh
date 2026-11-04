@@ -132,7 +132,34 @@ prepare_inventory() {
    [ -w "$ORA_INVENTORY" ] || err_exit "Inventory $ORA_INVENTORY is not writable by $(id -un)"
 }
 
+# Ubuntu/Debian gcc defaults to PIE; Oracle static archives are non-PIE, which
+# fails with R_X86_64_32S relocation errors (e.g. ins_precomp.mk proc target).
+patch_orald_for_pie() {
+   local orald="$ORACLE_HOME/bin/orald"
+   local os_like
+
+   [ -f "$orald" ] || err_exit "orald not found: $orald"
+
+   os_like=$(. /etc/os-release 2>/dev/null; echo "${ID_LIKE:-${ID:-}}")
+   case "$os_like" in
+      *debian*|*ubuntu*) ;;
+      *) return 0 ;;
+   esac
+
+   if grep -q -- '-no-pie' "$orald"; then
+      info_msg "orald already patched for non-PIE linking"
+   else
+      info_msg "Patching orald for Ubuntu/Debian non-PIE linking"
+      cp -a "$orald" "${orald}.orig" || err_exit "Failed to backup orald"
+      sed -i 's|exec gcc "\$@"|exec gcc -fno-PIE -no-pie -Wl,--no-as-needed "\$@"|' "$orald"
+      grep -q -- '-no-pie' "$orald" || err_exit "Failed to patch orald (exec gcc line not found)"
+   fi
+   # Force the gcc branch in orald (avoids raw ld without our flags)
+   export ORALD_USE_GCC=1
+}
+
 prepare_inventory
+patch_orald_for_pie
 
 echo "Oracle Base    : $ORACLE_BASE"
 echo "Oracle Home    : $ORACLE_HOME"
