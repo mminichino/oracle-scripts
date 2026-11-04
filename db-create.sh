@@ -3,11 +3,13 @@
 #
 unset SID_ARG
 unset PDB_ARG
-unset DATADIR
-unset RECODIR
+# DATADIR, RECODIR, ORACLE_SID, ORACLE_PDB, ORACLE_HOME, ORACLE_DATA_DIR,
+# and ORACLE_CHARACTERSET are taken from the environment when set.
+# Command-line flags override those values.
 CREATE_PDB=0
 SET_PASSWORD=0
-ORACLE_CHARACTERSET=US7ASCII
+ORACLE_CHARACTERSET="${ORACLE_CHARACTERSET:-US7ASCII}"
+DB_TOTAL_MEMORY_MB=2048
 SCRIPTDIR=$(cd $(dirname $0) && pwd)
 DBCARSPFILE="dbca-si.rsp"
 LISTENER_ONLY=0
@@ -17,18 +19,19 @@ ASM_MODE=0
 FRA_LOG_MODE=0
 
 function print_usage {
-   echo "Usage: $0 -s SID -p pdb_name -c -a -d data_dir -r reco_dir -l -g -w -m -f"
-   echo "          -s Oracle SID (oradb by default)"
-   echo "          -p PDB name (pdb_oradb by default)"
+   echo "Usage: $0 [-s SID] [-p pdb_name] [-d data_dir] [-r reco_dir] [-c] [-a] [-l] [-g] [-w] [-m] [-f]"
+   echo "          -s Oracle SID (env ORACLE_SID, else oradb)"
+   echo "          -p PDB name (env ORACLE_PDB, else pdb_<SID>)"
    echo "          -c Create a CDB with PDB (defaults to Non-CDB)"
-   echo "          -a Ask for sys/system password (defaults to randomly gemnerated)"
-   echo "          -d Data directory root (required, must exist)"
-   echo "          -r Recovery directory (defaults to data_dir/fra)"
-   echo "          -l Setup listener and exit (use -s to set SID)"
-   echo "          -g Enable archivelog and exit (use -s to set SID)"
-   echo "          -w Create Oracle password file and exit (use -s to set SID)"
+   echo "          -a Ask for sys/system password (defaults to a generated password)"
+   echo "          -d Data directory root (env ORACLE_DATA_DIR or DATADIR; must exist)"
+   echo "          -r Recovery directory (env RECODIR, else data_dir/fra)"
+   echo "          -l Setup listener and exit"
+   echo "          -g Enable archivelog and exit"
+   echo "          -w Create Oracle password file and exit"
    echo "          -m Enable ASM mode (provide disk group with -d option)"
    echo "          -f Use FRA for archive logs"
+   echo "Requires ORACLE_HOME. Run from an oracle login shell (su - oracle)."
 }
 
 function err_exit {
@@ -52,6 +55,18 @@ function info_msg {
    fi
 }
 
+function password_ok {
+   local p="$1"
+   [ "${#p}" -ge 8 ] || return 1
+   printf '%s' "$p" | grep -q '[A-Z]' || return 1
+   printf '%s' "$p" | grep -q '[a-z]' || return 1
+   printf '%s' "$p" | grep -q '[0-9]' || return 1
+   if [ -n "$ORACLE_SID" ]; then
+      printf '%s' "$p" | grep -qi "$ORACLE_SID" && return 1
+   fi
+   return 0
+}
+
 function get_password {
    while true
    do
@@ -63,11 +78,81 @@ function get_password {
       echo ""
       if [ "$PASSWORD" != "$CHECK_PASSWORD" ]; then
          echo "Passwords do not match"
+      elif ! password_ok "$PASSWORD"; then
+         echo "Password must be at least 8 characters and include uppercase, lowercase, and a digit, and must not contain the SID."
       else
          break
       fi
    done
    export ORACLE_PWD=$PASSWORD
+}
+
+function generate_password {
+   local p tries=0
+   command -v openssl >/dev/null 2>&1 || err_exit "openssl not found; cannot generate a password (use -a)"
+   while [ "$tries" -lt 20 ]
+   do
+      tries=$((tries + 1))
+      # Aa1 forces the 19c complexity classes; the random part supplies length.
+      p="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 12)Aa1"
+      password_ok "$p" && break
+      p=""
+   done
+   [ -n "$p" ] || err_exit "Failed to generate a password that meets 19c complexity rules"
+   export ORACLE_PWD=$p
+}
+
+function check_oracle_env {
+   if [ "$(id -u)" -eq 0 ]; then
+      err_exit "Run as the oracle user, not root (su - oracle)."
+   fi
+   [ -z "$ORACLE_HOME" ] && err_exit "ORACLE_HOME is not set. Log in as oracle (su - oracle) or export ORACLE_HOME."
+   [ ! -d "$ORACLE_HOME" ] && err_exit "ORACLE_HOME is not a directory: $ORACLE_HOME"
+   case ":$PATH:" in
+      *":$ORACLE_HOME/bin:"*) ;;
+      *)
+         export PATH="$ORACLE_HOME/bin:$PATH"
+         info_msg "Added $ORACLE_HOME/bin to PATH"
+         ;;
+   esac
+   if [ -z "$LD_LIBRARY_PATH" ]; then
+      export LD_LIBRARY_PATH="$ORACLE_HOME/lib"
+   fi
+   command -v sqlplus >/dev/null 2>&1 || err_exit "sqlplus not found. Check ORACLE_HOME ($ORACLE_HOME)."
+}
+
+function resolve_hostname {
+   [ -n "$HOST_FQDN" ] && return 0
+   local h ip
+   h=$(hostname -f 2>/dev/null || true)
+   if [ -z "$h" ]; then
+      h=$(hostname 2>/dev/null || true)
+      [ -n "$h" ] && warn_msg "hostname -f returned nothing; using '$h'. Add this host to DNS or /etc/hosts."
+   fi
+   [ -z "$h" ] && err_exit "Cannot resolve a hostname. Add '<ip> <hostname>' to /etc/hosts."
+   ip=$(getent hosts "$h" 2>/dev/null | awk '{print $1; exit}')
+   if [ -z "$ip" ]; then
+      warn_msg "Hostname '$h' does not resolve. Add '<ip> $h' to /etc/hosts or the listener may fail to start."
+   elif [ "${ip#127.}" != "$ip" ]; then
+      warn_msg "Hostname '$h' resolves to loopback ($ip). Map it to a non-loopback address in /etc/hosts."
+   fi
+   HOST_FQDN=$h
+}
+
+function check_memory {
+   local kb mb
+   kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)
+   if [ -z "$kb" ]; then
+      warn_msg "Cannot read /proc/meminfo; skipping memory check."
+      return 0
+   fi
+   mb=$((kb / 1024))
+   if [ "$mb" -lt "$DB_TOTAL_MEMORY_MB" ]; then
+      err_exit "Host has ${mb} MB RAM; the dbca response sets totalMemory=${DB_TOTAL_MEMORY_MB}. Need at least ${DB_TOTAL_MEMORY_MB} MB."
+   fi
+   if [ "$mb" -lt $((DB_TOTAL_MEMORY_MB + 1024)) ]; then
+      warn_msg "Host has ${mb} MB RAM and the database is configured for ${DB_TOTAL_MEMORY_MB} MB. The OS may be memory-starved."
+   fi
 }
 
 function create_password_file {
@@ -126,8 +211,8 @@ if [ $? -eq 0 ]; then
    LSNR_RUNNING=1
 fi
 
-LOCAL_HOSTNAME=$(hostname -f)
-[ -z "$LOCAL_HOSTNAME" ] && err_exit "Can not get local host name."
+resolve_hostname
+LOCAL_HOSTNAME=$HOST_FQDN
 
 if [ -n "$1" ]; then
 
@@ -177,7 +262,7 @@ DEDICATED_THROUGH_BROKER_LISTENER=ON
 DIAG_ADR_ENABLED = off
 EOF
 
-lsnrctl start
+lsnrctl start || err_exit "Failed to start the listener"
 
 }
 
@@ -266,7 +351,8 @@ fi
 
 function add_local_listener {
 [ -z "$ORACLE_SID" ] && err_exit "ORACLE_SID not set."
-LOCAL_HOSTNAME=$(hostname -f)
+resolve_hostname
+LOCAL_HOSTNAME=$HOST_FQDN
 
 which sqlplus 2>&1 >/dev/null
 [ $? -ne 0 ] && err_exit "sqlplus not found"
@@ -300,9 +386,9 @@ oracleVersionMin=$(sqlplus -V | grep -i version | sed -e 's/^.* [0-9]*\.\([0-9]*
 }
 
 function fs_prep {
-[ -z "$DATADIR" ] && err_exit "Data directory is required"
+[ -z "$DATADIR" ] && err_exit "Data directory is required (use -d or export ORACLE_DATA_DIR)"
 
-[ ! -d "$DATADIR" -o ! -w "$DATADIR" ] && err_exit "Data directory is not accessible"
+[ ! -d "$DATADIR" ] || [ ! -w "$DATADIR" ] && err_exit "Data directory is not accessible: $DATADIR"
 
 LOGDIR=$DATADIR/log
 
@@ -312,7 +398,11 @@ else
    warn_msg "Log directory $LOGDIR exists"
 fi
 
-[ -n "$RECODIR" ] && [ ! -d "$RECODIR" ] && [ ! -w "$RECODIR" ] && err_exit "Recovery directory is not accessible"
+if [ -n "$RECODIR" ]; then
+   if [ ! -d "$RECODIR" ] || [ ! -w "$RECODIR" ]; then
+      err_exit "Recovery directory is not accessible: $RECODIR"
+   fi
+fi
 
 if [ -z "$RECODIR" -a ! -d $DATADIR/fra ]; then
    mkdir $DATADIR/fra || err_exit "Can not create recovery directory"
@@ -417,9 +507,23 @@ if [ "$CREATE_PDB" -eq 1 ]; then
    fi
 fi
 
-export ORACLE_SID=${SID_ARG:-oradb}
-export ORACLE_PDB=${PDB_ARG:-pdb_oradb}
-[ -n "$SID_ARG" -a -z "$PDB_ARG" ] && PDB_ARG=pdb_${SID_ARG}
+check_oracle_env
+
+if [ -n "$SID_ARG" ]; then
+   export ORACLE_SID=$SID_ARG
+elif [ -z "$ORACLE_SID" ]; then
+   export ORACLE_SID=oradb
+fi
+
+if [ -n "$PDB_ARG" ]; then
+   export ORACLE_PDB=$PDB_ARG
+elif [ -z "$ORACLE_PDB" ]; then
+   export ORACLE_PDB=pdb_${ORACLE_SID}
+fi
+
+if [ -z "$DATADIR" ]; then
+   DATADIR="${ORACLE_DATA_DIR:-}"
+fi
 
 get_version
 
@@ -447,8 +551,10 @@ if [ "$ENABLELOG_ONLY" -eq 1 ]; then
    exit 0
 fi
 
+check_memory
+
 if [ "$SET_PASSWORD" -eq 0 ]; then
-   export ORACLE_PWD="$(openssl rand -base64 8 | sed -e 's/[+/=]/#/g')0"
+   generate_password
    echo "ORACLE PASSWORD FOR SYS AND SYSTEM: $ORACLE_PWD";
 else
    get_password
@@ -500,6 +606,8 @@ else
    sed -i -e "s|###ORACLE_PDB###|$ORACLE_PDB|g" /tmp/dbca.rsp
    sed -i -e "s|###ORACLE_CHARACTERSET###|$ORACLE_CHARACTERSET|g" /tmp/dbca.rsp
 fi
+
+command -v dbca >/dev/null 2>&1 || err_exit "dbca not found. Check ORACLE_HOME ($ORACLE_HOME)."
 
 listener_config
 
