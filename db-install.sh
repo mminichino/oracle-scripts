@@ -132,67 +132,7 @@ prepare_inventory() {
    [ -w "$ORA_INVENTORY" ] || err_exit "Inventory $ORA_INVENTORY is not writable by $(id -un)"
 }
 
-is_debian_like() {
-   local os_like
-   os_like=$(. /etc/os-release 2>/dev/null; echo "${ID_LIKE:-${ID:-}}")
-   case "$os_like" in
-      *debian*|*ubuntu*) return 0 ;;
-      *) return 1 ;;
-   esac
-}
-
-# Ubuntu/Debian gcc defaults to PIE; Oracle static archives are non-PIE, which
-# fails with R_X86_64_32S relocation errors (e.g. ins_precomp.mk proc target).
-patch_orald_for_pie() {
-   local orald="$ORACLE_HOME/bin/orald"
-
-   is_debian_like || return 0
-   [ -f "$orald" ] || err_exit "orald not found: $orald"
-
-   if grep -q -- '-no-pie' "$orald"; then
-      info_msg "orald already patched for non-PIE linking"
-   else
-      info_msg "Patching orald for Ubuntu/Debian non-PIE linking"
-      cp -a "$orald" "${orald}.orig" || err_exit "Failed to backup orald"
-      sed -i 's|exec gcc "\$@"|exec gcc -fno-PIE -no-pie -Wl,--no-as-needed "\$@"|' "$orald"
-      grep -q -- '-no-pie' "$orald" || err_exit "Failed to patch orald (exec gcc line not found)"
-   fi
-   # Force the gcc branch in orald (avoids raw ld without our flags)
-   export ORALD_USE_GCC=1
-}
-
-# glibc >= 2.34 moved stat() into shared libc; Oracle's lib/stubs/libc.so does
-# not export it, so linking orion (all_no_orcl) fails with:
-#   libnnzst19.a(...): undefined reference to `stat'
-# Replace the stubs with the real system libc (same approach as RHEL 9 notes).
-fix_glibc_libc_stubs() {
-   local stubs="$ORACLE_HOME/lib/stubs"
-   local libc_real stub
-
-   is_debian_like || return 0
-   [ -d "$stubs" ] || err_exit "Oracle stubs directory missing: $stubs"
-
-   libc_real=$(ldconfig -p 2>/dev/null | awk '/libc\.so\.6 \(libc6,x86-64\)/ {print $NF; exit}')
-   [ -z "$libc_real" ] && libc_real=/lib/x86_64-linux-gnu/libc.so.6
-   [ -e "$libc_real" ] || err_exit "System libc.so.6 not found"
-
-   info_msg "Replacing Oracle libc stubs with system libc ($libc_real)"
-   for stub in libc.so libc.so.6; do
-      if [ -e "$stubs/$stub" ] || [ -L "$stubs/$stub" ]; then
-         if [ -L "$stubs/$stub" ] && [ "$(readlink -f "$stubs/$stub")" = "$(readlink -f "$libc_real")" ]; then
-            continue
-         fi
-         if [ ! -e "$stubs/${stub}.orig" ]; then
-            cp -a "$stubs/$stub" "$stubs/${stub}.orig" || err_exit "Failed to backup $stubs/$stub"
-         fi
-      fi
-      ln -sfn "$libc_real" "$stubs/$stub"
-   done
-}
-
 prepare_inventory
-patch_orald_for_pie
-fix_glibc_libc_stubs
 
 echo "Oracle Base    : $ORACLE_BASE"
 echo "Oracle Home    : $ORACLE_HOME"
